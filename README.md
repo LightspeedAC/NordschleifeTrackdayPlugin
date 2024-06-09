@@ -104,7 +104,7 @@ Extra:
 
 ### Progression with Points
 
-Players earn points by completing a clean lap (without a cut or collision) and through bonuses. Each collision, pit-entry, and invalid lap completion deducts points from the player. As players earn more points they unlock access to more cars, and as they reach a certain milestone in points they are assigned as convoy leaders (more on that below).
+Players earn points by completing a clean lap (without a cut or collision) and through bonuses. Each collision, pit re-entry, and invalid lap completion deducts points from the player. As players earn more points they unlock access to more cars, and as they reach a certain milestone in points they are assigned as convoy leaders (more on that below).
 
 Earning points:
 
