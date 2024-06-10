@@ -1,0 +1,1273 @@
+using AssettoServer.Server;
+using AssettoServer.Network.Tcp;
+using Serilog;
+using System.Text.RegularExpressions;
+using NordschleifeTrackdayPlugin.Managers;
+using NordschleifeTrackdayPlugin.Session;
+using AssettoServer.Shared.Network.Packets.Shared;
+using AssettoServer.Shared.Services;
+using System.Data.SQLite;
+using AssettoServer.Server.Configuration;
+using Microsoft.Extensions.Hosting;
+using AssettoServer.Shared.Network.Packets;
+using System.Reflection;
+using NordschleifeTrackdayPlugin.Packets;
+using AssettoServer.Server.Weather;
+using System.Text.Json;
+using System.Text;
+using AssettoServer.Server.GeoParams;
+
+namespace NordschleifeTrackdayPlugin;
+
+public class NordschleifeTrackdayPlugin : CriticalBackgroundService
+{
+    public const int CONVOY_MIN_DRIVERS_NEEDED_ADMIN = 1;
+    public const int CONVOY_MIN_DRIVERS_NEEDED = 2;
+
+    public const string PLUGIN_NAME = "NordschleifeTrackdayPlugin";
+    public const string PLUGIN_PREFIX = $"[{PLUGIN_NAME}] ";
+    public const string CONVOY_PREFIX = "CONVOYS > ";
+    public const string TIP_PREFIX = "TIPS > ";
+    public const string DOUBLE_POINTS_PREFIX = "X2 POINTS > ";
+    public const string ANNOUNCEMENT_PREFIX = "SERVER > ";
+
+    public const string NO_NAME = "Unknown";
+    public const string DATABASE_FILE = "nordschleife_trackday.sqlite";
+    public SQLiteConnection _database = new($"Data Source={DATABASE_FILE};Version=3;");
+
+    public static NordschleifeTrackdayPlugin? _instance;
+    public readonly EntryCarManager _entryCarManager;
+    public readonly SessionManager _sessionManager;
+    public readonly WeatherManager _weatherManager;
+    public readonly NordschleifeTrackdaySessionManager _nordschleifeTrackdaySessionManager;
+    public readonly NordschleifeTrackdayConfiguration _config;
+
+    private static readonly string[] _forbiddenUsernameSubstrings = ["discord", "@", "#", ":", "```"];
+    private static readonly string[] _forbiddenUsernames = ["everyone", "here"];
+
+    private bool _warnedSessionEnd = false;
+    private readonly Queue<(string, long)> _recentLapStarts = [];//used to determine if a starting convoy is empty and should be ended 
+    private static readonly Dictionary<string, (string, uint)> _bestLapTimes = [];
+    private static readonly Dictionary<string, (long, List<ulong>, List<string>)> _convoys = [];//driver, (started, finishing drivers, starting drivers)
+    private static readonly List<string> _onlineConvoyLeaders = [];
+    private static readonly string[] _defaultAnnouncements = [
+        "If you need help, use /help and ask others for tips.",
+        $"Looking to be a convoy leader? Accumulate {_pointsNeededForConvoyLeader}+ points to be assigned as one and start hosting convoys!",
+        "Hope you're having fun on our server!",
+        $"Always remember to check your lap status with /status! You'll avoid the {_pointsDeductInvalidLap} point deduction for completing an invalid lap.",
+        "Please remember to respect all other drivers and to not tailgate! Don't forget to indicate, use your lights and hazards to communicate with other drivers.",
+    ];
+    private int _currentAnnouncementIndex = 0;
+
+    private static readonly List<string> _announcements = [];
+    private static string _serverLink = "";
+    public static readonly List<ulong> _admins = [];
+    private static readonly List<(string, int)> _cars = [];
+    private static readonly List<string> _starterCars = [];
+    private static readonly List<(int, int)> _prominentCleanLapRewards = [];
+    public static int _pointsNeededForConvoyLeader = 6500;
+    public static int _pointsStarting = 500;
+    public static int _pointsDeductLeavePits = 3;
+    public static int _pointsDeductInvalidLap = 250;
+    public static int _pointsDeductPitReEnter = 200;
+    public static double _pointsDeductBySpeedFactor = 1.4;
+    public static int _pointsDeductCollisionMax = 500;
+    public static int _pointsRewardPerLap = 30;
+    public static int _pointsRewardBeatPb = 50;
+    public static int _pointsRewardBeatTb = 75;
+    public static int _pointsRewardConvoy = 150;
+
+    public NordschleifeTrackdayPlugin(NordschleifeTrackdayConfiguration nordschleifeTrackdayConfiguration, GeoParamsManager geoParamsManager, ACServerConfiguration acServerConfiguration, EntryCarManager entryCarManager, SessionManager sessionManager, WeatherManager weatherManager, CSPServerScriptProvider cspServerScriptProvider, CSPClientMessageTypeManager cspClientMessageTypeManager, CSPFeatureManager cspFeatureManager, IHostApplicationLifetime applicationLifetime) : base(applicationLifetime)
+    {
+        Log.Information("--------------------------------------");
+        Log.Information($"{PLUGIN_NAME} - Jonfinity");
+        Log.Information("--------------------------------------");
+
+        _entryCarManager = entryCarManager;
+        _sessionManager = sessionManager;
+        _weatherManager = weatherManager;
+        _config = nordschleifeTrackdayConfiguration;
+        _nordschleifeTrackdaySessionManager = new NordschleifeTrackdaySessionManager(this);
+
+        if (!acServerConfiguration.Extra.EnableClientMessages)
+        {
+            Log.Fatal($"{PLUGIN_PREFIX}'EnableClientMessages' is required to be set to 'true'!");
+            applicationLifetime.StopApplication();
+            return;
+        }
+
+        entryCarManager.ClientConnected += OnClientConnected;
+        entryCarManager.ClientDisconnected += OnClientDisconnected;
+
+        cspClientMessageTypeManager.RegisterClientMessageType(0x38BAECD0, new Action<ACTcpClient, PacketReader>(IncomingCollision));
+        cspClientMessageTypeManager.RegisterClientMessageType(0xB7B908B4, new Action<ACTcpClient, PacketReader>(IncomingLapStart));
+        cspClientMessageTypeManager.RegisterClientMessageType(0x236CD37F, new Action<ACTcpClient, PacketReader>(IncomingLapCut));
+        cspClientMessageTypeManager.RegisterClientMessageType(0x4DA987D2, new Action<ACTcpClient, PacketReader>(IncomingPitLeave));
+        cspClientMessageTypeManager.RegisterClientMessageType(0x2BD9A705, new Action<ACTcpClient, PacketReader>(IncomingPitReEntry));
+        cspClientMessageTypeManager.RegisterClientMessageType(0x34213D1E, new Action<ACTcpClient, PacketReader>(IncomingPitConvoyLeave));
+        cspClientMessageTypeManager.RegisterClientMessageType(0xE5E9C8E, new Action<ACTcpClient, PacketReader>(IncomingConvoyNearFinish));
+        cspClientMessageTypeManager.RegisterClientMessageType(0xA5968DCA, new Action<ACTcpClient, PacketReader>(IncomingPitTeleport));
+        cspClientMessageTypeManager.RegisterClientMessageType(0x1B27688C, new Action<ACTcpClient, PacketReader>(IncomingConvoyAtNorthTurn));
+        cspClientMessageTypeManager.RegisterClientMessageType(0x8C75B5C8, new Action<ACTcpClient, PacketReader>(IncomingConvoyAtAirfield));
+        cspClientMessageTypeManager.RegisterClientMessageType(0xEC91598C, new Action<ACTcpClient, PacketReader>(IncomingConvoyAtFoxhole));
+        cspClientMessageTypeManager.RegisterClientMessageType(0xCCF18B8F, new Action<ACTcpClient, PacketReader>(IncomingConvoyAtKallenForest));
+        cspClientMessageTypeManager.RegisterClientMessageType(0xDE66F651, new Action<ACTcpClient, PacketReader>(IncomingConvoyAtWaterMill));
+        cspClientMessageTypeManager.RegisterClientMessageType(0x2B81FBFE, new Action<ACTcpClient, PacketReader>(IncomingConvoyAtLittleValley));
+        cspClientMessageTypeManager.RegisterClientMessageType(0xCA16E6C9, new Action<ACTcpClient, PacketReader>(IncomingConvoyAtFirstCarousel));
+        cspClientMessageTypeManager.RegisterClientMessageType(0x6EA934BA, new Action<ACTcpClient, PacketReader>(IncomingConvoyAtBrunnchen));
+        cspClientMessageTypeManager.RegisterClientMessageType(0xDB83048A, new Action<ACTcpClient, PacketReader>(IncomingConvoyAtSecondCarousel));
+
+        using var stream = new StreamReader(Assembly.GetExecutingAssembly().GetManifestResourceStream("NordschleifeTrackdayPlugin.Lua.NordschleifeTrackdayScript.lua")!);
+        cspServerScriptProvider.AddScript(stream.ReadToEnd(), "NordschleifeTrackdayScript.lua");
+
+        System.Timers.Timer timer = new(_config.Announcements.Interval * 1000);
+        timer.Elapsed += new System.Timers.ElapsedEventHandler(DoAnnouncements);
+        timer.Start();
+
+        LoadFromConfig(geoParamsManager, acServerConfiguration);
+        StartDatabase();
+        _instance = this;
+    }
+
+    private void LoadFromConfig(GeoParamsManager geoParamsManager, ACServerConfiguration acServerConfiguration)
+    {
+        Task.Delay(10 * 1000).ContinueWith((_) => _serverLink = $"https://acstuff.ru/s/q:race/online/join?ip={geoParamsManager.GeoParams.Ip}&httpPort={acServerConfiguration.Server.HttpPort}");//geoParamsManager.GeoParams isnt populated immediately
+
+        foreach (var guid in _config.Admins)
+        {
+            Log.Information($"{PLUGIN_PREFIX}Found admin `{guid}`..");
+            _admins.Add(guid);
+        }
+        Log.Information($"{PLUGIN_PREFIX}Found ({_config.Admins.Count}) admins.");
+
+        foreach (var item in _config.CleanLapBonuses)
+        {
+            Log.Information($"{PLUGIN_PREFIX}Found clean lap bonus at `{item.Key}` for `{item.Value}` points..");
+            _prominentCleanLapRewards.Add(new(item.Key, item.Value));
+        }
+        Log.Information($"{PLUGIN_PREFIX}Found ({_config.CleanLapBonuses.Count}) clean lap bonuses.");
+
+        foreach (var item in _config.Cars)
+        {
+            Log.Information($"{PLUGIN_PREFIX}Found car `{item.Key}` with `{item.Value}` points..");
+            _cars.Add(new(item.Key, item.Value));
+        }
+        Log.Information($"{PLUGIN_PREFIX}Found ({_config.Cars.Count}) cars.");
+
+        if (_config.Announcements.UseDefaultMessages)
+        {
+            foreach (var message in _defaultAnnouncements)
+            {
+                _announcements.Add(message);
+            }
+        }
+        foreach (var message in _config.Announcements.CustomMessages)
+        {
+            _announcements.Add(message);
+        }
+
+        _pointsNeededForConvoyLeader = _config.Extra.ConvoyLeadersNeededPoints;
+        _pointsStarting = _config.Metrics.StartingPoints;
+        _pointsDeductLeavePits = _config.Metrics.PointsDeductLeavePits;
+        _pointsDeductInvalidLap = _config.Metrics.PointsDeductInvalidLap;
+        _pointsDeductPitReEnter = _config.Metrics.PointsDeductPitReEnter;
+        _pointsDeductBySpeedFactor = _config.Metrics.PointsDeductBySpeedFactor;
+        _pointsDeductCollisionMax = _config.Metrics.PointsDeductCollisionMax;
+        _pointsRewardPerLap = _config.Metrics.PointsRewardPerLap;
+        _pointsRewardBeatPb = _config.Metrics.PointsRewardBeatPb;
+        _pointsRewardBeatTb = _config.Metrics.PointsRewardBeatOtherPb;
+        _pointsRewardConvoy = _config.Metrics.PointsRewardConvoy;
+    }
+
+    private void DoAnnouncements(object? sender, EventArgs args)
+    {
+        if (_sessionManager.ServerTimeMilliseconds < 60000)
+        {
+            return;
+        }
+
+        long currentSessionTime = _sessionManager.CurrentSession.SessionTimeMilliseconds;
+        if (!_warnedSessionEnd && (currentSessionTime + 360000) >= _sessionManager.CurrentSession.TimeLeftMilliseconds)
+        {
+            _entryCarManager.BroadcastPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = $"{ANNOUNCEMENT_PREFIX}The server session ends in 6 minutes, you'll be teleported to pits shortly."
+            });
+            Log.Information($"{PLUGIN_PREFIX}Just warned of nearing server session end in 6 mins!");
+            _warnedSessionEnd = true;
+        }
+
+        _entryCarManager.BroadcastPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"{ANNOUNCEMENT_PREFIX}{_announcements[_currentAnnouncementIndex]}"
+        });
+        _currentAnnouncementIndex = (_currentAnnouncementIndex + 1) % _announcements.Count;
+    }
+
+    private void StartDatabase()
+    {
+        if (!File.Exists(DATABASE_FILE))
+        {
+            SQLiteConnection.CreateFile(DATABASE_FILE);
+        }
+        _database.Open();
+
+        using (var command = new SQLiteCommand($"CREATE TABLE IF NOT EXISTS users (id INT PRIMARY KEY, name VARCHAR(255) NOT NULL, country VARCHAR(255) NOT NULL, points INT NOT NULL DEFAULT {_pointsStarting}, clean_lap_streak INT NOT NULL, last_clean_lap datetime DEFAULT '1970-01-02 00:00:00', cuts INT NOT NULL DEFAULT 0, collisions INT NOT NULL DEFAULT 0)", _database))
+        {
+            command.ExecuteNonQuery();
+        }
+        using (var command = new SQLiteCommand("CREATE TABLE IF NOT EXISTS laptimes (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INT NOT NULL, car VARCHAR(255) NOT NULL, time INT NOT NULL, average_speedkmh SMALLINT NOT NULL, completed_on datetime DEFAULT '1970-01-02 00:00:00', FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)", _database))
+        {
+            command.ExecuteNonQuery();
+        }
+
+        foreach (var car in _cars)
+        {
+            uint lapTime = 0;
+            string username = "";
+            using var command = new SQLiteCommand("SELECT laptimes.time, users.name FROM laptimes JOIN users ON laptimes.user_id = users.id WHERE laptimes.car = @car ORDER BY laptimes.time ASC LIMIT 0,1", _database);
+            command.Parameters.AddWithValue("@car", car.Item1);
+            using (var reader = command.ExecuteReader())
+            {
+                if (reader.Read())
+                {
+                    lapTime = Convert.ToUInt32(reader["time"]);
+                    username = reader.GetString(reader.GetOrdinal("name"));
+                }
+            }
+            _bestLapTimes.Add(car.Item1, (username, lapTime));
+        }
+    }
+
+    public static List<(string, int)> Cars()
+    {
+        return _cars;
+    }
+
+    public static List<string> StarterCars()
+    {
+        return _starterCars;
+    }
+
+    public static List<(int, int)> ProminentCleanLapRewards()
+    {
+        return _prominentCleanLapRewards;
+    }
+
+    public static int GetCleanLapPointsReward(int cleanLaps)
+    {
+        if (_instance == null)
+        {
+            return 0;
+        }
+
+        foreach (var reward in _prominentCleanLapRewards)
+        {
+            if (reward.Item1 == cleanLaps)
+            {
+                return reward.Item2;
+            }
+        }
+
+        if (_instance._config.ExtraCleanLapBonus.Enabled && cleanLaps >= _instance._config.ExtraCleanLapBonus.NeededCleanLaps)
+        {
+            return _instance._config.ExtraCleanLapBonus.BonusPoints;
+        }
+
+        return 0;
+    }
+
+    public void AddRecentLapStart(string driver, long time)
+    {
+        int count = _recentLapStarts.Count;
+        if (count > 5)
+        {
+            _recentLapStarts.Dequeue();
+        }
+
+        _recentLapStarts.Enqueue((driver, time));
+    }
+
+    public static Dictionary<string, (string, uint)> BestLapTimes()
+    {
+        return _bestLapTimes;
+    }
+
+    public static Dictionary<string, (long, List<ulong>, List<string>)> Convoys()
+    {
+        return _convoys;
+    }
+
+    public static void RemoveConvoy(string driver)
+    {
+        _convoys.Remove(driver);
+    }
+
+    public static void AddConvoy(string driver, List<ulong> finishingDrivers, List<string> startingDrivers, long time = 0)
+    {
+        _convoys.Add(driver, (time, finishingDrivers, startingDrivers));
+    }
+
+    public static bool StartConvoy(string driver, NordschleifeTrackdaySession session)
+    {
+        if (_convoys.ContainsKey(driver))
+        {
+            return false;
+        }
+
+        AddConvoy(driver, [], []);
+        session.SetHostingConvoy(true);
+
+        _instance?._entryCarManager.BroadcastPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"{CONVOY_PREFIX}@{session.Username()} ({session.Client().EntryCar.Model}) is starting a convoy! Make sure to meet at pits to earn a convoy bonus of {_pointsRewardConvoy} points for completing a lap with them."
+        });
+        return true;
+    }
+
+    public static async Task<bool> EndConvoyAsync(string driver, NordschleifeTrackdaySession session, bool lapCompleted = true, string reason = "")
+    {
+        if (!_convoys.ContainsKey(driver))
+        {
+            return false;
+        }
+
+        var convoy = _convoys[driver];
+        int driversNeeded = _admins.Contains(session.Client().Guid) ? CONVOY_MIN_DRIVERS_NEEDED_ADMIN : CONVOY_MIN_DRIVERS_NEEDED;
+        if (lapCompleted && convoy.Item1 > 0)//convoy has started at this point
+        {
+            int driversCount = convoy.Item2.Count;
+            if (driversCount >= driversNeeded)
+            {
+                for (int i = 0; i < driversCount; i++)
+                {
+                    ulong guid = convoy.Item2[i];
+                    NordschleifeTrackdaySession? otherDriverSession = _instance?._nordschleifeTrackdaySessionManager.GetSession(guid);
+                    if (otherDriverSession != null)
+                    {
+                        otherDriverSession.AddPoints(_pointsRewardConvoy);
+                        _instance?._entryCarManager.BroadcastPacket(new ChatMessage
+                        {
+                            SessionId = 255,
+                            Message = $"@{otherDriverSession.Username()} earned a convoy bonus of {_pointsRewardConvoy} points!"
+                        });
+                    }
+                }
+
+                string driversEnglish = driversCount == 1 ? "driver" : "drivers";
+                _instance?._entryCarManager.BroadcastPacket(new ChatMessage
+                {
+                    SessionId = 255,
+                    Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy concluded with {driversCount} {driversEnglish}! It started with {convoy.Item3.Count}."
+                });
+                session.AddPoints(_pointsRewardConvoy);
+                _instance?._entryCarManager.BroadcastPacket(new ChatMessage
+                {
+                    SessionId = 255,
+                    Message = $"@{session.Username()} earned a convoy bonus of {_pointsRewardConvoy} points!"
+                });
+
+                if (_instance?._config.DiscordWebhook.Enabled ?? false)
+                {
+                    await SendDiscordWebhook($"**{session.Username()}'s convoy has finished!**\nJoin for the next: {_serverLink}\nFinishing Drivers: {driversCount}");
+                }
+            }
+            else
+            {
+                _instance?._entryCarManager.BroadcastPacket(new ChatMessage
+                {
+                    SessionId = 255,
+                    Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy finished but didn't have enough drivers to give out rewards. At least {driversNeeded} drivers were required!"
+                });
+            }
+        }
+        else
+        {
+            _instance?._entryCarManager.BroadcastPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = reason == "" ? $"{CONVOY_PREFIX}@{session.Username()}'s convoy was ended." : $"{CONVOY_PREFIX}@{session.Username()}'s convoy was automatically ended for: {reason}."
+            });
+        }
+
+        RemoveConvoy(driver);
+        session.SetHostingConvoy(false);
+        return true;
+    }
+
+    public static List<string> OnlineConvoyLeaders()
+    {
+        return _onlineConvoyLeaders;
+    }
+
+    public static bool IsAConvoyLeader(NordschleifeTrackdaySession session)
+    {
+        if (_instance == null)
+        {
+            return false;
+        }
+
+        return _admins.Contains(session.Client().Guid) || (_instance._config.Extra.AssignConvoyLeadersByPoints && session.Points() >= _pointsNeededForConvoyLeader);
+    }
+
+    private void IncomingCollision(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        int speed = reader.Read<int>();
+        if (speed < 0)
+        {
+            return;
+        }
+
+        int takenPoints = (int)(speed / _pointsDeductBySpeedFactor);
+        if (takenPoints < 1)
+        {
+            return;
+        }
+        if (session.HostingConvoy())
+        {
+            takenPoints *= 2;
+        }
+        int max = session.HostingConvoy() ? _pointsDeductCollisionMax * 2 : _pointsDeductCollisionMax;
+        if (takenPoints > max)
+        {
+            takenPoints = max;
+        }
+
+        client.SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"You had a collision at a speed of {speed}km/h and lost {takenPoints} points!"
+        });
+        client.SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"{TIP_PREFIX}Since you had a collision, teleport to pits to preserve your clean laps and avoid a {_pointsDeductInvalidLap} point deduction. You can always use /status to check on this."
+        });
+        session.TakePoints(takenPoints);
+        session.SetClean(false);
+        session.AddCollision();
+        Log.Information($"{PLUGIN_PREFIX}{session.Username()} had a collision!");
+    }
+
+    private void IncomingLapStart(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate || client.Name == null)
+        {
+            return;
+        }
+
+        long serverTimeMs = _sessionManager.ServerTimeMilliseconds;
+        session.SetDoingLap(true);
+        session.SetLapStart(serverTimeMs);
+        session.ResetAverageSpeed();
+        foreach (var (key, value) in _convoys)
+        {
+            if (key == client.Name)
+            {
+                _convoys[key] = (serverTimeMs, _convoys[key].Item2, _convoys[key].Item3);
+                _entryCarManager.BroadcastPacket(new ChatMessage
+                {
+                    SessionId = 255,
+                    Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy has crossed the starting line! You still have 20 seconds to catch up if you'd like to earn a convoy bonus."
+                });
+                Task.Delay(20 * 1000).ContinueWith((_) => CheckConvoy(_convoys[key], session));
+                break;
+            }
+        }
+
+        AddRecentLapStart(client.Name, serverTimeMs);
+        Log.Information($"{PLUGIN_PREFIX}{session.Username()} started a lap!");
+    }
+
+    private async void CheckConvoy((long, List<ulong>, List<string>) convoy, NordschleifeTrackdaySession session)
+    {
+        string? convoyLeaderDriver = session.Client().Name;
+        if (convoyLeaderDriver != null)
+        {
+            List<string> possibleDrivers = [];
+            foreach (var recentLap in _recentLapStarts)
+            {
+                if (convoyLeaderDriver != recentLap.Item1 && !possibleDrivers.Contains(recentLap.Item1) && Math.Abs(recentLap.Item2 - convoy.Item1) <= 20000)
+                {
+                    possibleDrivers.Add(recentLap.Item1);
+                }
+            }
+
+            int needed = _admins.Contains(session.Client().Guid) ? CONVOY_MIN_DRIVERS_NEEDED_ADMIN : CONVOY_MIN_DRIVERS_NEEDED;
+            int possibleDriversCount = possibleDrivers.Count;
+            int diff = needed - possibleDriversCount;
+            if (possibleDriversCount < needed)
+            {
+                _ = EndConvoyAsync(convoyLeaderDriver, session, false, $"Not enough drivers, you need {diff} more");
+            }
+            else
+            {
+                foreach (var (key, value) in _convoys)
+                {
+                    if (key == convoyLeaderDriver)
+                    {
+                        _convoys[key] = (_convoys[key].Item1, _convoys[key].Item2, possibleDrivers);
+                        break;
+                    }
+                }
+
+                if (_instance?._config.DiscordWebhook.Enabled ?? false)
+                {
+                    await SendDiscordWebhook($"**Convoy started!**\nJoin: {_serverLink}\nLeader: {session.Username()} ({session.Client().EntryCar.Model})\nDrivers: {possibleDriversCount}");
+                }
+            }
+        }
+    }
+
+    private void IncomingLapCut(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        session.SetClean(false);
+        session.AddCut();
+        client.SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"{TIP_PREFIX}You had a cut! Teleport to pits to preserve your clean laps and avoid a {_pointsDeductInvalidLap} point deduction. You can always use /status to check on this."
+        });
+        Log.Information($"{PLUGIN_PREFIX}{session.Username()} had a lap cut!");
+    }
+
+    private void IncomingPitLeave(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        client.SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"You paid {_pointsDeductLeavePits} points for leaving pits."
+        });
+        if (IsDoublePoints())
+        {
+            client.SendPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = $"{DOUBLE_POINTS_PREFIX}It's that time, double points weekend! Make sure to get in as many laps as you can to get the most out of bonuses, etc. Enjoy!"
+            });
+        }
+        session.TakePoints(_pointsDeductLeavePits);
+    }
+
+    private void IncomingPitReEntry(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        _entryCarManager.BroadcastPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"@{session.Username()} was deducted {_pointsDeductPitReEnter} points for driving back into pits!"
+        });
+        client.SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"{TIP_PREFIX}You drove back into pits which is prohibited! Teleport back to pits to preserve your clean lap status."
+        });
+        session.SetClean(false);
+        session.TakePoints(_pointsDeductPitReEnter);
+        if (session.DoingLap())
+        {
+            session.SetDoingLap(false);
+        }
+
+        Log.Information($"{PLUGIN_PREFIX}{session.Username()} re-entered pits and was deducted points!");
+    }
+
+    private async void IncomingPitConvoyLeave(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        foreach (var (key, value) in _convoys)
+        {
+            if (key == client.Name)
+            {
+                await BroadcastWithDelayAsync($"{CONVOY_PREFIX}@{session.Username()}'s convoy is on the move!");
+                break;
+            }
+        }
+    }
+
+    private void IncomingConvoyNearFinish(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        foreach (var (key, value) in _convoys)
+        {
+            if (key == client.Name)
+            {
+                _entryCarManager.BroadcastPacket(new ChatMessage
+                {
+                    SessionId = 255,
+                    Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is approaching the finish line! Make sure to pass them and cross the finish line to claim your convoy bonus."
+                });
+                break;
+            }
+        }
+    }
+
+    private void IncomingPitTeleport(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        session.SetDoingLap(false);
+        if (!session.IsClean())
+        {
+            client.SendPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = "Your lap status is now clean after teleporting to pits!"
+            });
+        }
+        session.SetClean(true);
+        Log.Information($"{PLUGIN_PREFIX}{session.Username()} teleported to pits!");
+    }
+
+    private void IncomingConvoyAtNorthTurn(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        if (session.HostingConvoy())
+        {
+            foreach (var (key, value) in _convoys)
+            {
+                if (key == client.Name)
+                {
+                    _entryCarManager.BroadcastPacket(new ChatMessage
+                    {
+                        SessionId = 255,
+                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 2 (Nordkehre) going {session.Speed()}km/h."
+                    });
+                    break;
+                }
+            }
+        }
+    }
+    private void IncomingConvoyAtAirfield(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        if (session.HostingConvoy())
+        {
+            foreach (var (key, value) in _convoys)
+            {
+                if (key == client.Name)
+                {
+                    _entryCarManager.BroadcastPacket(new ChatMessage
+                    {
+                        SessionId = 255,
+                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 4 (Flugplatz) going {session.Speed()}km/h."
+                    });
+                    break;
+                }
+            }
+        }
+    }
+    private void IncomingConvoyAtFoxhole(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        if (session.HostingConvoy())
+        {
+            foreach (var (key, value) in _convoys)
+            {
+                if (key == client.Name)
+                {
+                    _entryCarManager.BroadcastPacket(new ChatMessage
+                    {
+                        SessionId = 255,
+                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 6 (Fuchsröhre) going {session.Speed()}km/h."
+                    });
+                    break;
+                }
+            }
+        }
+    }
+    private void IncomingConvoyAtKallenForest(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        if (session.HostingConvoy())
+        {
+            foreach (var (key, value) in _convoys)
+            {
+                if (key == client.Name)
+                {
+                    _entryCarManager.BroadcastPacket(new ChatMessage
+                    {
+                        SessionId = 255,
+                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 8 (Kallenhard) going {session.Speed()}km/h."
+                    });
+                    break;
+                }
+            }
+        }
+    }
+    private void IncomingConvoyAtWaterMill(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        if (session.HostingConvoy())
+        {
+            foreach (var (key, value) in _convoys)
+            {
+                if (key == client.Name)
+                {
+                    _entryCarManager.BroadcastPacket(new ChatMessage
+                    {
+                        SessionId = 255,
+                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 10 (Ex-Mühle) going {session.Speed()}km/h."
+                    });
+                    break;
+                }
+            }
+        }
+    }
+    private void IncomingConvoyAtLittleValley(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        if (session.HostingConvoy())
+        {
+            foreach (var (key, value) in _convoys)
+            {
+                if (key == client.Name)
+                {
+                    _entryCarManager.BroadcastPacket(new ChatMessage
+                    {
+                        SessionId = 255,
+                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 12 (Kesselchen) going {session.Speed()}km/h."
+                    });
+                    break;
+                }
+            }
+        }
+    }
+    private void IncomingConvoyAtFirstCarousel(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        if (session.HostingConvoy())
+        {
+            foreach (var (key, value) in _convoys)
+            {
+                if (key == client.Name)
+                {
+                    _entryCarManager.BroadcastPacket(new ChatMessage
+                    {
+                        SessionId = 255,
+                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at the first carousel (Karussell) going {session.Speed()}km/h."
+                    });
+                    break;
+                }
+            }
+        }
+    }
+    private void IncomingConvoyAtBrunnchen(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        if (session.HostingConvoy())
+        {
+            foreach (var (key, value) in _convoys)
+            {
+                if (key == client.Name)
+                {
+                    _entryCarManager.BroadcastPacket(new ChatMessage
+                    {
+                        SessionId = 255,
+                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at YouTube Corner (Brünnchen) going {session.Speed()}km/h."
+                    });
+                    break;
+                }
+            }
+        }
+    }
+    private void IncomingConvoyAtSecondCarousel(ACTcpClient client, PacketReader reader)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || !client.HasSentFirstUpdate)
+        {
+            return;
+        }
+
+        if (session.HostingConvoy())
+        {
+            foreach (var (key, value) in _convoys)
+            {
+                if (key == client.Name)
+                {
+                    _entryCarManager.BroadcastPacket(new ChatMessage
+                    {
+                        SessionId = 255,
+                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at the second carousel (Kleines Karussell) going {session.Speed()}km/h."
+                    });
+                    break;
+                }
+            }
+        }
+    }
+
+    public static bool AddOnlineConvoyLeader(NordschleifeTrackdaySession session)
+    {
+        string? name = session.Client().Name;
+        if (name == null || !IsAConvoyLeader(session))
+        {
+            return false;
+
+        }
+
+        if (!_onlineConvoyLeaders.Contains(name))
+        {
+            _onlineConvoyLeaders.Add(name);
+        }
+
+        return true;
+    }
+
+    public static bool RemoveOnlineConvoyLeader(NordschleifeTrackdaySession session)
+    {
+        string? name = session.Client().Name;
+        if (name == null)
+        {
+            return false;
+
+        }
+
+        if (!_onlineConvoyLeaders.Contains(name))
+        {
+            return false;
+        }
+
+        _onlineConvoyLeaders.Remove(name);
+        return true;
+    }
+
+    private void OnClientConnected(ACTcpClient client, EventArgs args)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.AddSession(client);
+        if (session == null)
+        {
+            return;
+        }
+        client.FirstUpdateSent += OnClientSpawn;
+        client.LapCompleted += OnClientLapCompleted;
+
+        string carModel = client.EntryCar.Model;
+        foreach (var car in _cars)
+        {
+            if (car.Item1 == carModel)
+            {
+                int currentPoints = session.Points();
+                if (car.Item2 > currentPoints)
+                {
+                    int more = car.Item2 - currentPoints;
+                    string str = $"not allowed to drive the {carModel}! You need {more} points.";
+                    session.PrepareKick(str);
+                }
+                break;
+            }
+        }
+    }
+
+    private void OnClientDisconnected(ACTcpClient client, EventArgs args)
+    {
+        client.FirstUpdateSent -= OnClientSpawn;
+        client.LapCompleted -= OnClientLapCompleted;
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null)
+        {
+            return;
+        }
+
+        if (client.HasSentFirstUpdate && !session.HasPreparedKick())
+        {
+            _entryCarManager.BroadcastPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = $"@{session.Username()}[{session.Points()}] disconnected and left the {client.EntryCar.Model} for grabs!"
+            });
+        }
+
+        if (client.Name == null)
+        {
+            return;
+        }
+        foreach (var (key, value) in _convoys)
+        {
+            if (key == client.Name)
+            {
+                _ = EndConvoyAsync(client.Name, session, false);
+            }
+
+            if (value.Item2.Contains(client.Guid))
+            {
+                value.Item2.Remove(client.Guid);
+            }
+        }
+
+        if (_onlineConvoyLeaders.Contains(client.Name))
+        {
+            _onlineConvoyLeaders.Remove(client.Name);
+        }
+
+        if (RemoveOnlineConvoyLeader(session))
+        {
+            _entryCarManager.BroadcastPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = $"{CONVOY_PREFIX}Convoy leader {session.Username()} is no longer online."
+            });
+        }
+        _nordschleifeTrackdaySessionManager.RemoveSession(client, session);
+    }
+
+    private void OnClientSpawn(ACTcpClient client, EventArgs args)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null)
+        {
+            return;
+        }
+
+        string carModel = client.EntryCar.Model;
+        client.SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"_____"
+        });
+        _entryCarManager.BroadcastPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"@{session.Username()}[{session.Points()}] connected with the {carModel}!"
+        });
+        if (AddOnlineConvoyLeader(session))
+        {
+            _entryCarManager.BroadcastPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = $"{CONVOY_PREFIX}Convoy leader {session.Username()} is now online."
+            });
+        }
+
+        uint bestLapTimeToBeat = 0;
+        string bestLapTimeToBeatBy = "";
+        foreach (var (key, value) in _bestLapTimes)
+        {
+            if (key == carModel)
+            {
+                bestLapTimeToBeat = value.Item2;
+                bestLapTimeToBeatBy = value.Item1;
+                break;
+            }
+        }
+        string lapTimeStr = TimeSpan.FromMilliseconds(bestLapTimeToBeat).ToString(@"mm\:ss\:fff");
+        string yourselfStr = bestLapTimeToBeatBy != "" && bestLapTimeToBeatBy == client.Name ? " (You)" : "";
+        client.SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = bestLapTimeToBeat < 1 ? $"There's no lap time set for the {carModel} yet! You can be the first to set it." : $"The best lap time with the {carModel} is {lapTimeStr} by @{bestLapTimeToBeatBy}{yourselfStr}!"
+        });
+
+        string? kickReason = session.PreparedKickReason();
+        if (kickReason != null)
+        {
+            if (_config.Extra.ImmediateKickCarNotUnlocked)
+            {
+                _entryCarManager.KickAsync(client, kickReason);
+            }
+            else
+            {
+                Task.Delay(30 * 1000).ContinueWith((_) => _ = _entryCarManager.KickAsync(client, kickReason));
+                client.SendPacket(new ChatMessage
+                {
+                    SessionId = 255,
+                    Message = $"You'll be kicked in 30 seconds! You are {kickReason}."
+                });
+                Task.Delay(5 * 1000).ContinueWith((_) => client.SendPacket(new NordschleifeTrackdayCarLockedPacket { IsLocked = 1 }));//sending immediately doesnt work
+            }
+        }
+    }
+
+    private void OnClientLapCompleted(ACTcpClient client, LapCompletedEventArgs args)
+    {
+        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        if (session == null || client.Name == null || !session.DoingLap() || session.LapStart() == 0)
+        {
+            return;
+        }
+
+        bool isLapInvalid = args.Packet.Cuts > 0 || !session.IsClean();
+        bool rewardedForConvoy = false;
+        foreach (var (key, value) in _convoys)
+        {
+            if (!session.HostingConvoy() && !isLapInvalid && !rewardedForConvoy && (Math.Abs(value.Item1 - session.LapStart()) <= 20000 || value.Item3.Contains(client.Name)))//checking Item3 ALSO allows drivers to be valid for a convoy bonus if they restart a lap but catch up to the same convoy
+            {
+                rewardedForConvoy = true;
+                value.Item2.Add(client.Guid);
+            }
+            else if (session.HostingConvoy() && key == client.Name)
+            {
+                _ = EndConvoyAsync(client.Name, session);
+            }
+        }
+
+        session.SetLapStart(0);
+        session.SetDoingLap(false);
+        if (isLapInvalid)
+        {
+            client.SendPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = $"You completed an invalid lap and lost {_pointsDeductInvalidLap} points! Next time, make sure to teleport to the pits if your lap becomes invalid by a collision or cut. Also remember to check your lap status with /status."
+            });
+            _entryCarManager.BroadcastPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = $"@{session.Username()} completed an invalid lap and lost {_pointsDeductInvalidLap} points!"
+            });
+            Log.Information($"{PLUGIN_PREFIX}{session.Username()} completed an invalid lap!");
+            session.ResetCleanLaps();
+            session.ResetMostRecentCleanLap();
+            session.TakePoints(_pointsDeductInvalidLap);
+            return;
+        }
+
+        uint lapTimeMs = args.Packet.LapTime;
+        string carModel = client.EntryCar.Model;
+        uint bestLapTimeToBeat = 0;
+        string bestLapTimeToBeatBy = "";
+        bool justBeat = false;
+        string messageA = "";
+        foreach (var (key, value) in _bestLapTimes)
+        {
+            if (key == carModel)
+            {
+                bestLapTimeToBeat = value.Item2;
+                bestLapTimeToBeatBy = value.Item1;
+                if (lapTimeMs < value.Item2 || value.Item2 < 1)
+                {
+                    justBeat = true;
+                    _bestLapTimes[key] = (session.Username(), lapTimeMs);
+                }
+                break;
+            }
+        }
+        string bestLapTimeToBeatStr = TimeSpan.FromMilliseconds(bestLapTimeToBeat).ToString(@"mm\:ss\:fff");
+        string formattedLapTime = TimeSpan.FromMilliseconds(lapTimeMs).ToString(@"mm\:ss\:fff");
+        if (justBeat)
+        {
+            if (bestLapTimeToBeat > 0 && bestLapTimeToBeatBy != "" && bestLapTimeToBeatBy != client.Name)
+            {
+                long lapTimeDifferenceMs = Math.Abs(bestLapTimeToBeat - lapTimeMs);
+                string timeEnglish;
+                if (lapTimeDifferenceMs >= 60000)
+                {
+                    long timeInMinutes = lapTimeDifferenceMs / 60000;
+                    timeEnglish = $"{timeInMinutes} {(timeInMinutes == 1 ? "minute" : "minutes")}";
+                }
+                else
+                {
+                    double timeInSeconds = lapTimeDifferenceMs / 1000.0;
+                    timeEnglish = $"{timeInSeconds:F3} {(timeInSeconds == 1.000 ? "second" : "seconds")}";
+                }
+
+                messageA = $"@{session.Username()} just beat @{bestLapTimeToBeatBy}'s lap time record of {bestLapTimeToBeatStr} by {timeEnglish} in the {carModel} and set a new record! {_pointsRewardBeatTb} points earned!";
+                session.AddPoints(_pointsRewardBeatTb);
+            }
+            else if (bestLapTimeToBeat < 1 && bestLapTimeToBeatBy == "")
+            {
+                messageA = $"@{session.Username()} just set a record lap time of {formattedLapTime} in the {carModel}!";
+            }
+        }
+        else if (!justBeat && bestLapTimeToBeat > 0)
+        {
+            messageA = $"@{bestLapTimeToBeatBy} still holds the best lap time record of {bestLapTimeToBeatStr} in the {carModel}!";
+        }
+        _entryCarManager.BroadcastPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = messageA
+        });
+
+        string messageB = $"@{session.Username()} completed a lap with a time of {formattedLapTime} averaging {session.AverageSpeed()}km/h. {_pointsRewardPerLap} points earned!";
+        if (session.BestLapTime() != 0 && lapTimeMs < session.BestLapTime())
+        {
+            int totalPointsEarned = _pointsRewardPerLap + _pointsRewardBeatPb;
+            messageB = $"@{session.Username()} just did a new personal best lap time of {formattedLapTime} averaging {session.AverageSpeed()}km/h! {totalPointsEarned} ({_pointsRewardPerLap} + {_pointsRewardBeatPb}) points earned!";
+            session.AddPoints(_pointsRewardBeatPb);
+            session.SetBestLapTime(lapTimeMs);
+        }
+        _entryCarManager.BroadcastPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = messageB
+        });
+
+        Log.Information($"{PLUGIN_PREFIX}{session.Username()} completed a clean lap!");
+        session.AddPoints(_pointsRewardPerLap);
+        session.AddCleanLap();
+        CreateLaptime(client, lapTimeMs, session.AverageSpeed());
+    }
+
+    public static string SanitizeUsername(string name)
+    {
+        foreach (string str in _forbiddenUsernames)
+        {
+            if (name == str)
+            {
+                return $"_{str}";
+            }
+        }
+
+        foreach (string str in _forbiddenUsernameSubstrings)
+        {
+            name = Regex.Replace(name, str, new string('*', str.Length), RegexOptions.IgnoreCase);
+        }
+
+        name = name[..Math.Min(name.Length, 80)];
+
+        return name;
+    }
+
+    public static bool IsDoublePoints()
+    {
+        if (_instance == null || !_instance._config.Extra.DoublePointWeekend)
+        {
+            return false;
+        }
+
+        DayOfWeek day = DateTime.Today.DayOfWeek;
+        return day == DayOfWeek.Saturday;
+    }
+
+    static async Task SendDiscordWebhook(string message)
+    {
+        if (_instance == null || !_instance._config.DiscordWebhook.Enabled)
+        {
+            return;
+        }
+
+        string webhookUrl = _instance?._config.DiscordWebhook.WebhookURL ?? "";
+        if (webhookUrl == "")
+        {
+            Log.Information($"{PLUGIN_PREFIX}Discord webhook not sent, URL in config is empty.");
+            return;
+        }
+
+        using HttpClient client = new();
+        string jsonPayload = JsonSerializer.Serialize(new { content = message });
+        StringContent content = new(jsonPayload, Encoding.UTF8, "application/json");
+        HttpResponseMessage response = await client.PostAsync(webhookUrl, content);
+        if (response.IsSuccessStatusCode)
+        {
+            Log.Information($"{PLUGIN_PREFIX}Discord webhook sent successfully.");
+        }
+        else
+        {
+            Log.Information($"{PLUGIN_PREFIX}Failed to send Discord webhook. Status code: {response.StatusCode}");
+        }
+    }
+
+    public async Task BroadcastWithDelayAsync(string msg, int delay = 1000, int repeat = 3)
+    {
+        for (int i = 0; i < repeat; i++)
+        {
+            _entryCarManager.BroadcastPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = msg
+            });
+
+            if (i < 2)
+            {
+                await Task.Delay(delay);
+            }
+        }
+    }
+
+    public void CreateLaptime(ACTcpClient client, uint time, int speed)
+    {
+        using var command = new SQLiteCommand("INSERT INTO laptimes (user_id, car, time, average_speedkmh, completed_on) VALUES (@user_id, @car, @time, @average_speedkmh, @completed_on)", _database);
+        command.Parameters.AddWithValue("@user_id", client.Guid);
+        command.Parameters.AddWithValue("@car", client.EntryCar.Model);
+        command.Parameters.AddWithValue("@time", time);
+        command.Parameters.AddWithValue("@average_speedkmh", speed);
+        command.Parameters.AddWithValue("@completed_on", DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"));
+        command.ExecuteNonQuery();
+    }
+
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        throw new NotImplementedException();
+    }
+}
