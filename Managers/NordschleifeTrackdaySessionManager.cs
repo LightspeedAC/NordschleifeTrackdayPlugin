@@ -42,7 +42,7 @@ public class NordschleifeTrackdaySessionManager
                     {
                         int afkTimeAllowed = _afkTimeAllowedDefault;
                         int notificationInterval = 60000;
-                        long currentTime = _plugin._sessionManager.ServerTimeMilliseconds;
+                        long currentTime = _plugin._asSessionManager.ServerTimeMilliseconds;
                         long timeAfk = currentTime - car.LastActiveTime;
                         if (NordschleifeTrackdayPlugin.StarterCars().Contains(car.Model))
                         {

@@ -149,7 +149,7 @@ public sealed class NordschleifeTrackdaySession
 
             if (_points < NordschleifeTrackdayPlugin._pointsNeededForConvoyLeader && before >= NordschleifeTrackdayPlugin._pointsNeededForConvoyLeader)
             {
-                if (NordschleifeTrackdayPlugin.RemoveOnlineConvoyLeader(this))
+                if (_plugin._convoyManager.RemoveOnlineConvoyLeader(this))
                 {
                     _client.SendPacket(new ChatMessage
                     {
@@ -191,7 +191,7 @@ public sealed class NordschleifeTrackdaySession
 
             if (_points >= NordschleifeTrackdayPlugin._pointsNeededForConvoyLeader && before < NordschleifeTrackdayPlugin._pointsNeededForConvoyLeader)
             {
-                if (NordschleifeTrackdayPlugin.AddOnlineConvoyLeader(this))
+                if (_plugin._convoyManager.AddOnlineConvoyLeader(this))
                 {
                     _plugin._entryCarManager.BroadcastPacket(new ChatMessage
                     {

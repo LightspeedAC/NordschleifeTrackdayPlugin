@@ -24,7 +24,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        if (!NordschleifeTrackdayPlugin._admins.Contains(Client.Guid))
+        if (!NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid))
         {
             Reply("You have no access to this command!");
             return;
@@ -38,7 +38,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(providedOther ? otherGuid : Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(providedOther ? otherGuid : Client.Guid);
         if (session == null)
         {
             return;
@@ -61,7 +61,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        if (!NordschleifeTrackdayPlugin._admins.Contains(Client.Guid))
+        if (!NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid))
         {
             Reply("You have no access to this command!");
             return;
@@ -75,7 +75,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(providedOther ? otherGuid : Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(providedOther ? otherGuid : Client.Guid);
         if (session == null)
         {
             return;
@@ -98,13 +98,13 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
         if (session == null)
         {
             return;
         }
 
-        if (!NordschleifeTrackdayPlugin.IsAConvoyLeader(session))
+        if (!_plugin._convoyManager.IsAConvoyLeader(session))
         {
             Reply("You have no access to this command!");
             return;
@@ -116,7 +116,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        if (!NordschleifeTrackdayPlugin.StartConvoy(Client.Name, session))
+        if (!_plugin._convoyManager.StartConvoy(session))
         {
             Reply("You're already hosting a convoy.");
             return;
@@ -131,19 +131,19 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
         if (session == null)
         {
             return;
         }
 
-        if (!NordschleifeTrackdayPlugin.IsAConvoyLeader(session))
+        if (!_plugin._convoyManager.IsAConvoyLeader(session))
         {
             Reply("You have no access to this command!");
             return;
         }
 
-        _ = NordschleifeTrackdayPlugin.EndConvoyAsync(Client.Name, session, false);
+        _ = _plugin._convoyManager.EndConvoyAsync(session, false);
     }
 
     [Command("ct")]
@@ -154,13 +154,13 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
         if (session == null)
         {
             return;
         }
 
-        if (!NordschleifeTrackdayPlugin._admins.Contains(Client.Guid))
+        if (!NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid))
         {
             Reply("You have no access to this command!");
             return;
@@ -172,7 +172,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        NordschleifeTrackdaySession? otherSession = _plugin._nordschleifeTrackdaySessionManager.GetSession(driver.Guid);
+        NordschleifeTrackdaySession? otherSession = _plugin._sessionManager.GetSession(driver.Guid);
         if (otherSession == null)
         {
             Reply("Driver not found with a valid session!");
@@ -186,14 +186,14 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         }
 
         bool success = false;
-        foreach (var convoy in NordschleifeTrackdayPlugin.Convoys())
+        foreach (var convoy in _plugin._convoyManager.Convoys())
         {
-            if (convoy.Key == Client.Name)
+            if (convoy.Key == Client.Guid)
             {
                 session.SetHostingConvoy(false);
                 otherSession.SetHostingConvoy(true);
-                NordschleifeTrackdayPlugin.RemoveConvoy(Client.Name);
-                NordschleifeTrackdayPlugin.AddConvoy(driver.Name, convoy.Value.Item2, convoy.Value.Item3);
+                _plugin._convoyManager.RemoveConvoy(Client.Guid);
+                _plugin._convoyManager.AddConvoy(otherSession, convoy.Value.FinishingDrivers(), convoy.Value.StartingDrivers());
                 success = true;
                 break;
             }
@@ -266,7 +266,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         Reply("- /allbest: See the best lap time records for every car on the server");
         Reply("- /cl: See your clean laps streak");
         Reply("- /tl: See your total laps");
-        if (NordschleifeTrackdayPlugin._admins.Contains(Client.Guid))
+        if (NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid))
         {
             Reply("- /afp[args: int, driver(opt)]: Add points to self or others");
             Reply("- /tfp[args: int, driver(opt)]: Remove points from self or others");
@@ -281,10 +281,10 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        if (NordschleifeTrackdayPlugin.OnlineConvoyLeaders().Count > 0)
+        if (_plugin._convoyManager.OnlineConvoyLeaders().Count > 0)
         {
             Reply("Online Convoy Leaders:");
-            foreach (var name in NordschleifeTrackdayPlugin.OnlineConvoyLeaders())
+            foreach (var name in _plugin._convoyManager.OnlineConvoyLeaders())
             {
                 Reply($"\n- {name}");
             }
@@ -294,13 +294,14 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             Reply("There are no convoy leaders currently online.");
         }
 
-        if (NordschleifeTrackdayPlugin.Convoys().Count > 0)
+        var convoys = _plugin._convoyManager.Convoys();
+        if (convoys.Count > 0)
         {
             Reply("Ongoing Convoys:");
-            foreach (var convoy in NordschleifeTrackdayPlugin.Convoys())
+            foreach (var convoy in convoys)
             {
-                string startedStr = convoy.Value.Item1 > 0 ? "started" : "waiting";
-                Reply($"\n- {convoy.Key} ({startedStr}): {convoy.Value.Item3.Count} drivers");
+                string startedStr = convoy.Value.HasStarted() ? "started" : "waiting";
+                Reply($"\n- {convoy.Value.Leader().Username()} ({startedStr}): {convoy.Value.StartingDrivers().Count} drivers");
             }
         }
     }
@@ -312,27 +313,44 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         {
             return;
         }
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(driver.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(driver.Guid);
         if (session == null)
         {
             Reply("Driver not found with a valid session!");
             return;
         }
 
-        string convoyLeaderName = driver.Name;
-        if (NordschleifeTrackdayPlugin.Convoys().Count > 0)
+        var convoys = _plugin._convoyManager.Convoys();
+        if (convoys.Count > 0)
         {
-            foreach (var convoy in NordschleifeTrackdayPlugin.Convoys())
+            foreach (var convoy in convoys)
             {
-                if (convoy.Key.StartsWith(convoyLeaderName))
+                if (convoy.Key == driver.Guid)
                 {
-                    int driversCount = convoy.Value.Item3.Count;
-                    string driversStr = driversCount > 0 ? string.Join(", ", convoy.Value.Item3) : "populated 20 seconds after start";
+                    int driversCount = convoy.Value.StartingDrivers().Count;
+                    List<string> startingDriversStr = [];
+                    for (int i = 0; i < driversCount; i++)
+                    {
+                        NordschleifeTrackdaySession? otherDriverSession = _plugin._sessionManager.GetSession(convoy.Value.StartingDrivers()[i]);
+                        if (otherDriverSession != null)
+                        {
+                            startingDriversStr.Add(otherDriverSession.Username());
+                        }
+                        else
+                        {
+                            startingDriversStr.Add(NordschleifeTrackdayPlugin.NO_NAME);
+                        }
+                    }
+                    string driversStr = "populated 20 seconds after start";
+                    if (driversCount > 0)
+                    {
+                        driversStr = string.Join(", ", startingDriversStr);
+                    }
                     string timeEnglish = "not yet";
                     string averageSpeedEnglish = "";
-                    if (convoy.Value.Item1 > 0)
+                    if (convoy.Value.HasStarted())
                     {
-                        long timeInSeconds = (_plugin._sessionManager.ServerTimeMilliseconds - convoy.Value.Item1) / 1000;
+                        long timeInSeconds = (_plugin._asSessionManager.ServerTimeMilliseconds - convoy.Value.StartedTimeMs()) / 1000;
                         if (timeInSeconds >= 60)
                         {
                             long timeInMinutes = timeInSeconds / 60;
@@ -346,13 +364,13 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
                         averageSpeedEnglish = $"\nAverage speed: {session.AverageSpeed()}km/h";
                     }
 
-                    Reply($"{convoy.Key}'s Convoy ({driver.EntryCar.Model}):\nStarted: {timeEnglish}{averageSpeedEnglish}");
+                    Reply($"{convoy.Value.Leader().Username()}'s Convoy ({driver.EntryCar.Model}):\nStarted: {timeEnglish}{averageSpeedEnglish}");
                     Reply($"\nDrivers ({driversCount}): {driversStr}");
                     break;
                 }
                 else
                 {
-                    Reply($"No convoy by the leader '{convoyLeaderName}' was found.");
+                    Reply($"No convoy by the leader '{driver.Name}' was found.");
                 }
             }
         }
@@ -371,7 +389,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         }
 
         Reply("List of Cars:");
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
         if (session == null)
         {
             foreach (var car in NordschleifeTrackdayPlugin.Cars())
@@ -416,7 +434,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
         if (session == null)
         {
             return;
@@ -437,7 +455,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
         if (session == null)
         {
             return;
@@ -454,7 +472,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
         if (session == null)
         {
             return;
@@ -473,7 +491,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
         if (session == null)
         {
             return;
@@ -504,7 +522,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
         if (session == null)
         {
             return;
@@ -533,7 +551,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
         if (session == null)
         {
             return;
@@ -563,7 +581,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        NordschleifeTrackdaySession? session = _plugin._nordschleifeTrackdaySessionManager.GetSession(Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
         if (session == null)
         {
             return;

@@ -37,19 +37,18 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
     public static NordschleifeTrackdayPlugin? _instance;
     public readonly EntryCarManager _entryCarManager;
-    public readonly SessionManager _sessionManager;
+    public readonly SessionManager _asSessionManager;
     public readonly WeatherManager _weatherManager;
-    public readonly NordschleifeTrackdaySessionManager _nordschleifeTrackdaySessionManager;
+    public readonly NordschleifeTrackdaySessionManager _sessionManager;
+    public readonly NordschleifeTrackdayConvoyManager _convoyManager;
     public readonly NordschleifeTrackdayConfiguration _config;
 
     private static readonly string[] _forbiddenUsernameSubstrings = ["discord", "@", "#", ":", "```"];
     private static readonly string[] _forbiddenUsernames = ["everyone", "here"];
 
     private bool _warnedSessionEnd = false;
-    private readonly Queue<(string, long)> _recentLapStarts = [];//used to determine if a starting convoy is empty and should be ended 
+    private readonly Queue<(ulong, long)> _recentLapStarts = [];//used to determine if a starting convoy is empty and should be ended 
     private static readonly Dictionary<string, (string, uint)> _bestLapTimes = [];
-    private static readonly Dictionary<string, (long, List<ulong>, List<string>)> _convoys = [];//driver, (started, finishing drivers, starting drivers)
-    private static readonly List<string> _onlineConvoyLeaders = [];
     private static readonly string[] _defaultAnnouncements = [
         "If you need help, use /help and ask others for tips.",
         $"Looking to be a convoy leader? Accumulate {_pointsNeededForConvoyLeader}+ points to be assigned as one and start hosting convoys!",
@@ -60,11 +59,11 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     private int _currentAnnouncementIndex = 0;
 
     private static readonly List<string> _announcements = [];
-    private static string _serverLink = "";
-    public static readonly List<ulong> _admins = [];
+    private static readonly List<ulong> _admins = [];
     private static readonly List<(string, int)> _cars = [];
     private static readonly List<string> _starterCars = [];
     private static readonly List<(int, int)> _prominentCleanLapRewards = [];
+    public static string _serverLink = "";
     public static int _pointsNeededForConvoyLeader = 6500;
     public static int _pointsStarting = 500;
     public static int _pointsDeductLeavePits = 3;
@@ -84,10 +83,11 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         Log.Information("--------------------------------------");
 
         _entryCarManager = entryCarManager;
-        _sessionManager = sessionManager;
+        _asSessionManager = sessionManager;
         _weatherManager = weatherManager;
         _config = nordschleifeTrackdayConfiguration;
-        _nordschleifeTrackdaySessionManager = new NordschleifeTrackdaySessionManager(this);
+        _sessionManager = new NordschleifeTrackdaySessionManager(this);
+        _convoyManager = new NordschleifeTrackdayConvoyManager(this);
 
         if (!acServerConfiguration.Extra.EnableClientMessages)
         {
@@ -181,13 +181,13 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
     private void DoAnnouncements(object? sender, EventArgs args)
     {
-        if (_sessionManager.ServerTimeMilliseconds < 60000)
+        if (_asSessionManager.ServerTimeMilliseconds < 60000)
         {
             return;
         }
 
-        long currentSessionTime = _sessionManager.CurrentSession.SessionTimeMilliseconds;
-        if (!_warnedSessionEnd && (currentSessionTime + 360000) >= _sessionManager.CurrentSession.TimeLeftMilliseconds)
+        long currentSessionTime = _asSessionManager.CurrentSession.SessionTimeMilliseconds;
+        if (!_warnedSessionEnd && (currentSessionTime + 360000) >= _asSessionManager.CurrentSession.TimeLeftMilliseconds)
         {
             _entryCarManager.BroadcastPacket(new ChatMessage
             {
@@ -241,6 +241,11 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         }
     }
 
+    public static List<ulong> Admins()
+    {
+        return _admins;
+    }
+
     public static List<(string, int)> Cars()
     {
         return _cars;
@@ -279,7 +284,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         return 0;
     }
 
-    public void AddRecentLapStart(string driver, long time)
+    public void AddRecentLapStart(ulong driver, long time)
     {
         int count = _recentLapStarts.Count;
         if (count > 5)
@@ -290,132 +295,19 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         _recentLapStarts.Enqueue((driver, time));
     }
 
+    public Queue<(ulong, long)> RecentLapStarts()
+    {
+        return _recentLapStarts;
+    }
+
     public static Dictionary<string, (string, uint)> BestLapTimes()
     {
         return _bestLapTimes;
     }
 
-    public static Dictionary<string, (long, List<ulong>, List<string>)> Convoys()
-    {
-        return _convoys;
-    }
-
-    public static void RemoveConvoy(string driver)
-    {
-        _convoys.Remove(driver);
-    }
-
-    public static void AddConvoy(string driver, List<ulong> finishingDrivers, List<string> startingDrivers, long time = 0)
-    {
-        _convoys.Add(driver, (time, finishingDrivers, startingDrivers));
-    }
-
-    public static bool StartConvoy(string driver, NordschleifeTrackdaySession session)
-    {
-        if (_convoys.ContainsKey(driver))
-        {
-            return false;
-        }
-
-        AddConvoy(driver, [], []);
-        session.SetHostingConvoy(true);
-
-        _instance?._entryCarManager.BroadcastPacket(new ChatMessage
-        {
-            SessionId = 255,
-            Message = $"{CONVOY_PREFIX}@{session.Username()} ({session.Client().EntryCar.Model}) is starting a convoy! Make sure to meet at pits to earn a convoy bonus of {_pointsRewardConvoy} points for completing a lap with them."
-        });
-        return true;
-    }
-
-    public static async Task<bool> EndConvoyAsync(string driver, NordschleifeTrackdaySession session, bool lapCompleted = true, string reason = "")
-    {
-        if (!_convoys.ContainsKey(driver))
-        {
-            return false;
-        }
-
-        var convoy = _convoys[driver];
-        int driversNeeded = _admins.Contains(session.Client().Guid) ? CONVOY_MIN_DRIVERS_NEEDED_ADMIN : CONVOY_MIN_DRIVERS_NEEDED;
-        if (lapCompleted && convoy.Item1 > 0)//convoy has started at this point
-        {
-            int driversCount = convoy.Item2.Count;
-            if (driversCount >= driversNeeded)
-            {
-                for (int i = 0; i < driversCount; i++)
-                {
-                    ulong guid = convoy.Item2[i];
-                    NordschleifeTrackdaySession? otherDriverSession = _instance?._nordschleifeTrackdaySessionManager.GetSession(guid);
-                    if (otherDriverSession != null)
-                    {
-                        otherDriverSession.AddPoints(_pointsRewardConvoy);
-                        _instance?._entryCarManager.BroadcastPacket(new ChatMessage
-                        {
-                            SessionId = 255,
-                            Message = $"@{otherDriverSession.Username()} earned a convoy bonus of {_pointsRewardConvoy} points!"
-                        });
-                    }
-                }
-
-                string driversEnglish = driversCount == 1 ? "driver" : "drivers";
-                _instance?._entryCarManager.BroadcastPacket(new ChatMessage
-                {
-                    SessionId = 255,
-                    Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy concluded with {driversCount} {driversEnglish}! It started with {convoy.Item3.Count}."
-                });
-                session.AddPoints(_pointsRewardConvoy);
-                _instance?._entryCarManager.BroadcastPacket(new ChatMessage
-                {
-                    SessionId = 255,
-                    Message = $"@{session.Username()} earned a convoy bonus of {_pointsRewardConvoy} points!"
-                });
-
-                if (_instance?._config.DiscordWebhook.Enabled ?? false)
-                {
-                    await SendDiscordWebhook($"**{session.Username()}'s convoy has finished!**\nJoin for the next: {_serverLink}\nFinishing Drivers: {driversCount}");
-                }
-            }
-            else
-            {
-                _instance?._entryCarManager.BroadcastPacket(new ChatMessage
-                {
-                    SessionId = 255,
-                    Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy finished but didn't have enough drivers to give out rewards. At least {driversNeeded} drivers were required!"
-                });
-            }
-        }
-        else
-        {
-            _instance?._entryCarManager.BroadcastPacket(new ChatMessage
-            {
-                SessionId = 255,
-                Message = reason == "" ? $"{CONVOY_PREFIX}@{session.Username()}'s convoy was ended." : $"{CONVOY_PREFIX}@{session.Username()}'s convoy was automatically ended for: {reason}."
-            });
-        }
-
-        RemoveConvoy(driver);
-        session.SetHostingConvoy(false);
-        return true;
-    }
-
-    public static List<string> OnlineConvoyLeaders()
-    {
-        return _onlineConvoyLeaders;
-    }
-
-    public static bool IsAConvoyLeader(NordschleifeTrackdaySession session)
-    {
-        if (_instance == null)
-        {
-            return false;
-        }
-
-        return _admins.Contains(session.Client().Guid) || (_instance._config.Extra.AssignConvoyLeadersByPoints && session.Points() >= _pointsNeededForConvoyLeader);
-    }
-
     private void IncomingCollision(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -460,78 +352,38 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
     private void IncomingLapStart(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate || client.Name == null)
         {
             return;
         }
 
-        long serverTimeMs = _sessionManager.ServerTimeMilliseconds;
+        long serverTimeMs = _asSessionManager.ServerTimeMilliseconds;
         session.SetDoingLap(true);
         session.SetLapStart(serverTimeMs);
         session.ResetAverageSpeed();
-        foreach (var (key, value) in _convoys)
+        foreach (var (key, convoy) in _convoyManager.Convoys())
         {
-            if (key == client.Name)
+            if (key == client.Guid)
             {
-                _convoys[key] = (serverTimeMs, _convoys[key].Item2, _convoys[key].Item3);
+                convoy.SetStartedTimeMs(serverTimeMs);
                 _entryCarManager.BroadcastPacket(new ChatMessage
                 {
                     SessionId = 255,
                     Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy has crossed the starting line! You still have 20 seconds to catch up if you'd like to earn a convoy bonus."
                 });
-                Task.Delay(20 * 1000).ContinueWith((_) => CheckConvoy(_convoys[key], session));
+                Task.Delay(20 * 1000).ContinueWith((_) => _convoyManager.CheckConvoy(_convoyManager.Convoys()[key], session));
                 break;
             }
         }
 
-        AddRecentLapStart(client.Name, serverTimeMs);
+        AddRecentLapStart(client.Guid, serverTimeMs);
         Log.Information($"{PLUGIN_PREFIX}{session.Username()} started a lap!");
-    }
-
-    private async void CheckConvoy((long, List<ulong>, List<string>) convoy, NordschleifeTrackdaySession session)
-    {
-        string? convoyLeaderDriver = session.Client().Name;
-        if (convoyLeaderDriver != null)
-        {
-            List<string> possibleDrivers = [];
-            foreach (var recentLap in _recentLapStarts)
-            {
-                if (convoyLeaderDriver != recentLap.Item1 && !possibleDrivers.Contains(recentLap.Item1) && Math.Abs(recentLap.Item2 - convoy.Item1) <= 20000)
-                {
-                    possibleDrivers.Add(recentLap.Item1);
-                }
-            }
-
-            int needed = _admins.Contains(session.Client().Guid) ? CONVOY_MIN_DRIVERS_NEEDED_ADMIN : CONVOY_MIN_DRIVERS_NEEDED;
-            int possibleDriversCount = possibleDrivers.Count;
-            int diff = needed - possibleDriversCount;
-            if (possibleDriversCount < needed)
-            {
-                _ = EndConvoyAsync(convoyLeaderDriver, session, false, $"Not enough drivers, you need {diff} more");
-            }
-            else
-            {
-                foreach (var (key, value) in _convoys)
-                {
-                    if (key == convoyLeaderDriver)
-                    {
-                        _convoys[key] = (_convoys[key].Item1, _convoys[key].Item2, possibleDrivers);
-                        break;
-                    }
-                }
-
-                if (_instance?._config.DiscordWebhook.Enabled ?? false)
-                {
-                    await SendDiscordWebhook($"**Convoy started!**\nJoin: {_serverLink}\nLeader: {session.Username()} ({session.Client().EntryCar.Model})\nDrivers: {possibleDriversCount}");
-                }
-            }
-        }
     }
 
     private void IncomingLapCut(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -549,7 +401,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
     private void IncomingPitLeave(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -573,7 +425,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
     private void IncomingPitReEntry(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -601,15 +453,15 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
     private async void IncomingPitConvoyLeave(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
         }
 
-        foreach (var (key, value) in _convoys)
+        foreach (var (key, convoy) in _convoyManager.Convoys())
         {
-            if (key == client.Name)
+            if (key == client.Guid)
             {
                 await BroadcastWithDelayAsync($"{CONVOY_PREFIX}@{session.Username()}'s convoy is on the move!");
                 break;
@@ -619,15 +471,15 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
     private void IncomingConvoyNearFinish(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
         }
 
-        foreach (var (key, value) in _convoys)
+        foreach (var (key, convoy) in _convoyManager.Convoys())
         {
-            if (key == client.Name)
+            if (key == client.Guid)
             {
                 _entryCarManager.BroadcastPacket(new ChatMessage
                 {
@@ -641,7 +493,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
     private void IncomingPitTeleport(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -662,7 +514,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
     private void IncomingConvoyAtNorthTurn(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -670,9 +522,9 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
         if (session.HostingConvoy())
         {
-            foreach (var (key, value) in _convoys)
+            foreach (var (key, convoy) in _convoyManager.Convoys())
             {
-                if (key == client.Name)
+                if (key == client.Guid)
                 {
                     _entryCarManager.BroadcastPacket(new ChatMessage
                     {
@@ -686,7 +538,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     }
     private void IncomingConvoyAtAirfield(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -694,9 +546,9 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
         if (session.HostingConvoy())
         {
-            foreach (var (key, value) in _convoys)
+            foreach (var (key, convoy) in _convoyManager.Convoys())
             {
-                if (key == client.Name)
+                if (key == client.Guid)
                 {
                     _entryCarManager.BroadcastPacket(new ChatMessage
                     {
@@ -710,7 +562,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     }
     private void IncomingConvoyAtFoxhole(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -718,9 +570,9 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
         if (session.HostingConvoy())
         {
-            foreach (var (key, value) in _convoys)
+            foreach (var (key, convoy) in _convoyManager.Convoys())
             {
-                if (key == client.Name)
+                if (key == client.Guid)
                 {
                     _entryCarManager.BroadcastPacket(new ChatMessage
                     {
@@ -734,7 +586,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     }
     private void IncomingConvoyAtKallenForest(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -742,9 +594,9 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
         if (session.HostingConvoy())
         {
-            foreach (var (key, value) in _convoys)
+            foreach (var (key, convoy) in _convoyManager.Convoys())
             {
-                if (key == client.Name)
+                if (key == client.Guid)
                 {
                     _entryCarManager.BroadcastPacket(new ChatMessage
                     {
@@ -758,7 +610,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     }
     private void IncomingConvoyAtWaterMill(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -766,9 +618,9 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
         if (session.HostingConvoy())
         {
-            foreach (var (key, value) in _convoys)
+            foreach (var (key, convoy) in _convoyManager.Convoys())
             {
-                if (key == client.Name)
+                if (key == client.Guid)
                 {
                     _entryCarManager.BroadcastPacket(new ChatMessage
                     {
@@ -782,7 +634,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     }
     private void IncomingConvoyAtLittleValley(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -790,9 +642,9 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
         if (session.HostingConvoy())
         {
-            foreach (var (key, value) in _convoys)
+            foreach (var (key, convoy) in _convoyManager.Convoys())
             {
-                if (key == client.Name)
+                if (key == client.Guid)
                 {
                     _entryCarManager.BroadcastPacket(new ChatMessage
                     {
@@ -806,7 +658,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     }
     private void IncomingConvoyAtFirstCarousel(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -814,9 +666,9 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
         if (session.HostingConvoy())
         {
-            foreach (var (key, value) in _convoys)
+            foreach (var (key, convoy) in _convoyManager.Convoys())
             {
-                if (key == client.Name)
+                if (key == client.Guid)
                 {
                     _entryCarManager.BroadcastPacket(new ChatMessage
                     {
@@ -830,7 +682,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     }
     private void IncomingConvoyAtBrunnchen(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -838,9 +690,9 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
         if (session.HostingConvoy())
         {
-            foreach (var (key, value) in _convoys)
+            foreach (var (key, convoy) in _convoyManager.Convoys())
             {
-                if (key == client.Name)
+                if (key == client.Guid)
                 {
                     _entryCarManager.BroadcastPacket(new ChatMessage
                     {
@@ -854,7 +706,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     }
     private void IncomingConvoyAtSecondCarousel(ACTcpClient client, PacketReader reader)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || !client.HasSentFirstUpdate)
         {
             return;
@@ -862,9 +714,9 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
         if (session.HostingConvoy())
         {
-            foreach (var (key, value) in _convoys)
+            foreach (var (key, convoy) in _convoyManager.Convoys())
             {
-                if (key == client.Name)
+                if (key == client.Guid)
                 {
                     _entryCarManager.BroadcastPacket(new ChatMessage
                     {
@@ -877,44 +729,9 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         }
     }
 
-    public static bool AddOnlineConvoyLeader(NordschleifeTrackdaySession session)
-    {
-        string? name = session.Client().Name;
-        if (name == null || !IsAConvoyLeader(session))
-        {
-            return false;
-
-        }
-
-        if (!_onlineConvoyLeaders.Contains(name))
-        {
-            _onlineConvoyLeaders.Add(name);
-        }
-
-        return true;
-    }
-
-    public static bool RemoveOnlineConvoyLeader(NordschleifeTrackdaySession session)
-    {
-        string? name = session.Client().Name;
-        if (name == null)
-        {
-            return false;
-
-        }
-
-        if (!_onlineConvoyLeaders.Contains(name))
-        {
-            return false;
-        }
-
-        _onlineConvoyLeaders.Remove(name);
-        return true;
-    }
-
     private void OnClientConnected(ACTcpClient client, EventArgs args)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.AddSession(client);
+        NordschleifeTrackdaySession? session = _sessionManager.AddSession(client);
         if (session == null)
         {
             return;
@@ -943,7 +760,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     {
         client.FirstUpdateSent -= OnClientSpawn;
         client.LapCompleted -= OnClientLapCompleted;
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null)
         {
             return;
@@ -962,25 +779,22 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         {
             return;
         }
-        foreach (var (key, value) in _convoys)
+        foreach (var (key, convoy) in _convoyManager.Convoys())
         {
-            if (key == client.Name)
+            if (key == client.Guid)
             {
-                _ = EndConvoyAsync(client.Name, session, false);
+                _ = _convoyManager.EndConvoyAsync(session, false);
             }
 
-            if (value.Item2.Contains(client.Guid))
-            {
-                value.Item2.Remove(client.Guid);
-            }
+            convoy.RemoveFinishingDriver(client.Guid);
         }
 
-        if (_onlineConvoyLeaders.Contains(client.Name))
+        if (_convoyManager.OnlineConvoyLeaders().Contains(client.Name))
         {
-            _onlineConvoyLeaders.Remove(client.Name);
+            _convoyManager.OnlineConvoyLeaders().Remove(client.Name);
         }
 
-        if (RemoveOnlineConvoyLeader(session))
+        if (_convoyManager.RemoveOnlineConvoyLeader(session))
         {
             _entryCarManager.BroadcastPacket(new ChatMessage
             {
@@ -988,12 +802,12 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
                 Message = $"{CONVOY_PREFIX}Convoy leader {session.Username()} is no longer online."
             });
         }
-        _nordschleifeTrackdaySessionManager.RemoveSession(client, session);
+        _sessionManager.RemoveSession(client, session);
     }
 
     private void OnClientSpawn(ACTcpClient client, EventArgs args)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null)
         {
             return;
@@ -1010,7 +824,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             SessionId = 255,
             Message = $"@{session.Username()}[{session.Points()}] connected with the {carModel}!"
         });
-        if (AddOnlineConvoyLeader(session))
+        if (_convoyManager.AddOnlineConvoyLeader(session))
         {
             _entryCarManager.BroadcastPacket(new ChatMessage
             {
@@ -1060,7 +874,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
     private void OnClientLapCompleted(ACTcpClient client, LapCompletedEventArgs args)
     {
-        NordschleifeTrackdaySession? session = _nordschleifeTrackdaySessionManager.GetSession(client.Guid);
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
         if (session == null || client.Name == null || !session.DoingLap() || session.LapStart() == 0)
         {
             return;
@@ -1068,16 +882,16 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
         bool isLapInvalid = args.Packet.Cuts > 0 || !session.IsClean();
         bool rewardedForConvoy = false;
-        foreach (var (key, value) in _convoys)
+        foreach (var (key, convoy) in _convoyManager.Convoys())
         {
-            if (!session.HostingConvoy() && !isLapInvalid && !rewardedForConvoy && (Math.Abs(value.Item1 - session.LapStart()) <= 20000 || value.Item3.Contains(client.Name)))//checking Item3 ALSO allows drivers to be valid for a convoy bonus if they restart a lap but catch up to the same convoy
+            if (!session.HostingConvoy() && !isLapInvalid && !rewardedForConvoy && (convoy.IsStartTimeValid(session.LapStart()) || convoy.StartingDrivers().Contains(client.Guid)))//checking Item3 ALSO allows drivers to be valid for a convoy bonus if they restart a lap but catch up to the same convoy
             {
                 rewardedForConvoy = true;
-                value.Item2.Add(client.Guid);
+                convoy.AddFinishingDriver(client.Guid);
             }
-            else if (session.HostingConvoy() && key == client.Name)
+            else if (session.HostingConvoy() && key == client.Guid)
             {
-                _ = EndConvoyAsync(client.Name, session);
+                _ = _convoyManager.EndConvoyAsync(session);
             }
         }
 
@@ -1210,7 +1024,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         return day == DayOfWeek.Saturday;
     }
 
-    static async Task SendDiscordWebhook(string message)
+    public static async Task SendDiscordWebhook(string message)
     {
         if (_instance == null || !_instance._config.DiscordWebhook.Enabled)
         {
