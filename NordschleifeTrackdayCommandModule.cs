@@ -147,7 +147,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
     }
 
     [Command("ct")]
-    public void ConvoyTransfer(ACTcpClient driver)
+    public async void ConvoyTransfer(ACTcpClient driver, ACTcpClient? driverConvoyLeader = null)
     {
         if (Client == null || Client.Name == null || driver.Name == null)
         {
@@ -179,39 +179,61 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        if (otherSession.DoingLap())
-        {
-            Reply($"{driver.Name} isn't at pits! You can only transfer the leadership of a convoy to drivers currently in pits.");
-            return;
-        }
-
         bool success = false;
-        foreach (var convoy in _plugin._convoyManager.Convoys())
+        if (driverConvoyLeader != null)
         {
-            if (convoy.Key == Client.Guid)
+            NordschleifeTrackdaySession? otherConvoyLeaderSession = _plugin._sessionManager.GetSession(driverConvoyLeader.Guid);
+            if (otherConvoyLeaderSession == null)
             {
-                session.SetHostingConvoy(false);
-                otherSession.SetHostingConvoy(true);
-                _plugin._convoyManager.RemoveConvoy(Client.Guid);
-                _plugin._convoyManager.AddConvoy(otherSession, convoy.Value.FinishingDrivers(), convoy.Value.StartingDrivers());
-                success = true;
-                break;
+                Reply("Convoy leader not found with a valid session!");
+                return;
             }
-        }
 
-        if (!success)
-        {
-            Reply("You're not currently hosting a convoy.");
+            foreach (var convoy in _plugin._convoyManager.Convoys())
+            {
+                if (convoy.Key == driverConvoyLeader.Guid)
+                {
+                    otherConvoyLeaderSession.SetHostingConvoy(false);
+                    otherSession.SetHostingConvoy(true);
+                    _plugin._convoyManager.RemoveConvoy(driverConvoyLeader.Guid);
+                    _plugin._convoyManager.AddConvoy(otherSession, convoy.Value.FinishingDrivers(), convoy.Value.StartingDrivers());
+                    success = true;
+                    break;
+                }
+            }
         }
         else
         {
-            Reply($"Successfully transferred leadership of the convoy to {driver.Name}.");
+            foreach (var convoy in _plugin._convoyManager.Convoys())
+            {
+                if (convoy.Key == Client.Guid)
+                {
+                    session.SetHostingConvoy(false);
+                    otherSession.SetHostingConvoy(true);
+                    _plugin._convoyManager.RemoveConvoy(Client.Guid);
+                    _plugin._convoyManager.AddConvoy(otherSession, convoy.Value.FinishingDrivers(), convoy.Value.StartingDrivers());
+                    success = true;
+                    break;
+                }
+            }
+        }
+
+        string name = driverConvoyLeader != null ? driverConvoyLeader?.Name ?? NordschleifeTrackdayPlugin.NO_NAME : Client.Name;
+        if (!success)
+        {
+            Reply(driverConvoyLeader != null ? $"{driverConvoyLeader.Name} is not currently hosting a convoy." : "You're not currently hosting a convoy.");
+        }
+        else
+        {
+            Reply($"Successfully transferred leadership of {(driverConvoyLeader != null ? "{name}'s" : "your")} convoy to {driver.Name}.");
             driver.SendPacket(new ChatMessage
             {
                 SessionId = 255,
-                Message = $"You're now taking leadership of {Client.Name}'s convoy, goodluck!"
+                Message = $"You're now taking leadership of {name}'s convoy, goodluck!"
             });
         }
+
+        await _plugin.BroadcastWithDelayAsync($"{NordschleifeTrackdayPlugin.CONVOY_PREFIX}Leadership of {name}'s convoy was transferred to {driver.Name} in the {driver.EntryCar.Model}!");
     }
 
     [Command("chelp")]
@@ -235,7 +257,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         Reply("Commands:");
         Reply("- /cs: Start a convoy");
         Reply("- /ce: End your convoy");
-        Reply("- /ct[args: driver]: Transfer leadership of your convoy");
+        Reply("- /ct[args: driver, driverConvoyLeader(opt)]: Transfer leadership of your convoy to another driver, or the leadership of another convoy to another driver");
     }
 
     [Command("help")]

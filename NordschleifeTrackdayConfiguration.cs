@@ -42,8 +42,7 @@ public class AnnouncementsConfiguration
 {
     public bool Enabled { get; set; } = true;
     public int Interval { get; set; } = 600;
-    public bool UseDefaultMessages { get; set; } = true;
-    public List<string> CustomMessages { get; init; } = [];
+    public List<string> Messages { get; init; } = [];
 }
 
 public class DiscordWebhookConfiguration

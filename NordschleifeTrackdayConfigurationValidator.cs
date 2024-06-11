@@ -40,8 +40,7 @@ public class NordschleifeTrackdayConfigurationValidator : AbstractValidator<Nord
         {
             ch.RuleFor(cfg => cfg.Enabled).NotNull();
             ch.RuleFor(cfg => cfg.Interval).NotNull().GreaterThanOrEqualTo(60);
-            ch.RuleFor(cfg => cfg.UseDefaultMessages).NotNull();
-            ch.RuleFor(cfg => cfg.CustomMessages).NotNull();
+            ch.RuleFor(cfg => cfg.Messages).NotNull();
         });
         RuleFor(cfg => cfg.DiscordWebhook).NotNull().ChildRules(ch =>
         {

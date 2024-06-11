@@ -49,20 +49,13 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     private bool _warnedSessionEnd = false;
     private readonly Queue<(ulong, long)> _recentLapStarts = [];//used to determine if a starting convoy is empty and should be ended 
     private static readonly Dictionary<string, (string, uint)> _bestLapTimes = [];
-    private static readonly string[] _defaultAnnouncements = [
-        "If you need help, use /help and ask others for tips.",
-        $"Looking to be a convoy leader? Accumulate {_pointsNeededForConvoyLeader}+ points to be assigned as one and start hosting convoys!",
-        "Hope you're having fun on our server!",
-        $"Always remember to check your lap status with /status! You'll avoid the {_pointsDeductInvalidLap} point deduction for completing an invalid lap.",
-        "Please remember to respect all other drivers and to not tailgate! Don't forget to indicate, use your lights and hazards to communicate with other drivers.",
-    ];
     private int _currentAnnouncementIndex = 0;
 
-    private static readonly List<string> _announcements = [];
     private static readonly List<ulong> _admins = [];
     private static readonly List<(string, int)> _cars = [];
     private static readonly List<string> _starterCars = [];
     private static readonly List<(int, int)> _prominentCleanLapRewards = [];
+    private static readonly List<string> _announcements = [];
     public static string _serverLink = "";
     public static int _pointsNeededForConvoyLeader = 6500;
     public static int _pointsStarting = 500;
@@ -149,19 +142,13 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
         foreach (var item in _config.Cars)
         {
+            string starterCarStr = _config.StarterCars.Contains(item.Key) ? " (starter)" : "";
             Log.Information($"{PLUGIN_PREFIX}Found car `{item.Key}` with `{item.Value}` points..");
             _cars.Add(new(item.Key, item.Value));
         }
         Log.Information($"{PLUGIN_PREFIX}Found ({_config.Cars.Count}) cars.");
 
-        if (_config.Announcements.UseDefaultMessages)
-        {
-            foreach (var message in _defaultAnnouncements)
-            {
-                _announcements.Add(message);
-            }
-        }
-        foreach (var message in _config.Announcements.CustomMessages)
+        foreach (var message in _config.Announcements.Messages)
         {
             _announcements.Add(message);
         }
@@ -884,7 +871,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         bool rewardedForConvoy = false;
         foreach (var (key, convoy) in _convoyManager.Convoys())
         {
-            if (!session.HostingConvoy() && !isLapInvalid && !rewardedForConvoy && (convoy.IsStartTimeValid(session.LapStart()) || convoy.StartingDrivers().Contains(client.Guid)))//checking Item3 ALSO allows drivers to be valid for a convoy bonus if they restart a lap but catch up to the same convoy
+            if (!session.HostingConvoy() && !isLapInvalid && !rewardedForConvoy && (convoy.IsStartTimeValid(session.LapStart()) || convoy.StartingDrivers().Contains(client.Guid)))//checking convoy.StartingDrivers() ALSO allows drivers to be valid for a convoy bonus if they restart a lap but catch up to the same convoy
             {
                 rewardedForConvoy = true;
                 convoy.AddFinishingDriver(client.Guid);

@@ -81,11 +81,10 @@ Metrics: # Point earning and deductions
 Announcements: # Automated messages (announcements) in chat
   Enabled: true
   Interval: 600 # In seconds, how often to send an announcement
-  UseDefaultMessages: true # Whether to use the preset announcements
-  CustomMessages: ["Hello from the NordschleifeTrackdayPlugin!"] # Your own announcements
+  Messages: ["If you need help, use /help and ask others for tips.", "Hope you're having fun on our server!"] # Your announcements
 DiscordWebhook: # Plugin sends a Discord webhook for convoys starting & finishing
   Enabled: true
-  WebhookURL: "https://discord.com/api/webhooks/x/x" # Your Discord webhook URL
+  WebhookURL: "" # Your Discord webhook URL e.g. "https://discord.com/api/webhooks/x/x"
 IdleKick: # Plugin kicks idle players
   Enabled: true
   DefaultMaxIdleTime: 600 # In seconds, how long players can idle for by default
@@ -147,7 +146,7 @@ Automated messages sent by the server at a specified interval.
 - `/chelp`: Quick guide on convoys and list of convoy related commands
 - `/cs`: Start a convoy
 - `/ce`: End a convoy
-- `/ct`: Transfer leadership of a convoy (for admins)
+- `/ct`: Allows drivers to transfer leadership of their convoy to another driver, or leadership of a different convoy to another driver (for admins)
 - `/convoys`: Shows a list of online convoy leaders and any ongoing convoys
 - `/convoy`: Shows info on a specific convoy, like when it started and its drivers
 - `/cars`: Shows the list of cars, how many points each of them require, and whether the player has unlocked them
