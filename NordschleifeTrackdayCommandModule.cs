@@ -180,41 +180,29 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         }
 
         bool success = false;
+        NordschleifeTrackdaySession? otherConvoyLeaderSession = null;
         if (driverConvoyLeader != null)
         {
-            NordschleifeTrackdaySession? otherConvoyLeaderSession = _plugin._sessionManager.GetSession(driverConvoyLeader.Guid);
+            otherConvoyLeaderSession = _plugin._sessionManager.GetSession(driverConvoyLeader.Guid);
             if (otherConvoyLeaderSession == null)
             {
                 Reply("Convoy leader not found with a valid session!");
                 return;
             }
-
-            foreach (var convoy in _plugin._convoyManager.Convoys())
-            {
-                if (convoy.Key == driverConvoyLeader.Guid)
-                {
-                    otherConvoyLeaderSession.SetHostingConvoy(false);
-                    otherSession.SetHostingConvoy(true);
-                    _plugin._convoyManager.RemoveConvoy(driverConvoyLeader.Guid);
-                    _plugin._convoyManager.AddConvoy(otherSession, convoy.Value.FinishingDrivers(), convoy.Value.StartingDrivers());
-                    success = true;
-                    break;
-                }
-            }
         }
-        else
+
+        ACTcpClient search = driverConvoyLeader ?? Client;
+        NordschleifeTrackdaySession ssn = otherConvoyLeaderSession ?? session;
+        foreach (var convoy in _plugin._convoyManager.Convoys())
         {
-            foreach (var convoy in _plugin._convoyManager.Convoys())
+            if (convoy.Key == search.Guid)
             {
-                if (convoy.Key == Client.Guid)
-                {
-                    session.SetHostingConvoy(false);
-                    otherSession.SetHostingConvoy(true);
-                    _plugin._convoyManager.RemoveConvoy(Client.Guid);
-                    _plugin._convoyManager.AddConvoy(otherSession, convoy.Value.FinishingDrivers(), convoy.Value.StartingDrivers());
-                    success = true;
-                    break;
-                }
+                ssn.SetHostingConvoy(false);
+                otherSession.SetHostingConvoy(true);
+                _plugin._convoyManager.RemoveConvoy(search.Guid);
+                _plugin._convoyManager.AddConvoy(otherSession, convoy.Value.FinishingDrivers(), convoy.Value.StartingDrivers());
+                success = true;
+                break;
             }
         }
 
