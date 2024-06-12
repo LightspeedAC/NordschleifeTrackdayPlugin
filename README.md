@@ -88,9 +88,9 @@ DiscordWebhook: # Plugin sends a Discord webhook for convoys starting & finishin
   WebhookURL: "" # Your Discord webhook URL e.g. "https://discord.com/api/webhooks/x/x"
 IdleKick: # Plugin kicks idle players
   Enabled: true
-  DefaultMaxIdleTime: 600 # In seconds, how long players can idle for by default
-  LongerMaxIdleTime: 900 # In seconds, how long players can idle for if they have more clean laps (specified below)
-  StarterMaxIdleTime: 3600 # In seconds, how long players can idle for if theyre in a starter car (these cars are probably the most used and should be available as often as they can)
+  DefaultMaxIdleTime: 900 # In seconds, how long players can idle for by default
+  LongerMaxIdleTime: 3600 # In seconds, how long players can idle for if they have more clean laps (specified in LongerMaxIdleNeededCleanLaps)
+  StarterMaxIdleTime: 600 # In seconds, how long players can idle for if theyre in a starter car (these cars are probably the most used and should be available as often as they can)
   AllowLongerMaxIdleForCleanLaps: true # Whether to allow players with more clean laps to be able to idle longer
   LongerMaxIdleNeededCleanLaps: 5 # How many clean laps are needed to be able to idle longer
 Extra:
