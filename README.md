@@ -26,26 +26,26 @@ Admins: []
 # List of each car and how many points each requires
 Cars:
   ks_mclaren_p1: 50000
-  ferrari_f40_s3: 20000
-  ks_lamborghini_aventador_sv: 16750
-  ks_ferrari_488_gtb: 15000
-  ks_porsche_911_gt3_rs: 14000
-  ferrari_458: 12500
-  ks_ford_gt40: 10000
-  ks_mazda_rx7_tuned: 9000
-  ks_corvette_c7_stingray: 8750
-  ks_bmw_m4: 8150
-  ks_porsche_cayman_gt4_std: 7350
-  lotus_exige_v6_cup: 6450
-  ks_porsche_718_cayman_s: 6000
-  bmw_m3_e30_gra: 5500
-  bmw_z4: 4850
-  lotus_exige_240: 4150
-  ks_audi_sport_quattro: 4000
-  ks_nissan_370z: 3000
-  ks_toyota_supra_mkiv: 2250
-  ks_mazda_rx7_spirit_r: 1500
-  ks_audi_a1s1: 600
+  ferrari_f40_s3: 30000
+  ks_lamborghini_aventador_sv: 26500
+  ks_ferrari_488_gtb: 22000
+  ks_porsche_911_gt3_rs: 19000
+  ferrari_458: 18500
+  ks_ford_gt40: 17000
+  ks_mazda_rx7_tuned: 16000
+  ks_corvette_c7_stingray: 14750
+  ks_bmw_m4: 13800
+  ks_porsche_cayman_gt4_std: 13000
+  lotus_exige_v6_cup: 9000
+  ks_porsche_718_cayman_s: 7500
+  bmw_m3_e30_gra: 6000
+  bmw_z4: 5150
+  lotus_exige_240: 4750
+  ks_audi_sport_quattro: 4200
+  ks_nissan_370z: 3250
+  ks_toyota_supra_mkiv: 2500
+  ks_mazda_rx7_spirit_r: 1750
+  ks_audi_a1s1: 850
   ks_mazda_mx5_nd: 350
   ks_toyota_gt86: 250
   ks_alfa_romeo_gta: 125
@@ -56,22 +56,23 @@ StarterCars: ["ks_mazda_mx5_nd", "ks_toyota_gt86", "ks_alfa_romeo_gta", "abarth5
 # List of major clean lap bonus points players can earn
 CleanLapBonuses:
   3: 150
-  4: 275
-  5: 650
-  10: 1350
-  20: 3500
-  30: 9500
-  40: 20000
-  50: 50000
-  100: 100000
+  4: 200
+  5: 300
+  10: 1500
+  20: 2500
+  30: 3500
+  40: 4500
+  50: 5500
+  100: 10000
 ExtraCleanLapBonus: # Gives bonus points to players with more than x clean laps (if x is not in the CleanLapBonuses list, and is above NeededCleanLaps)
   Enabled: true
   NeededCleanLaps: 11 # How many clean laps are needed to start earning the point bonus specified below
   BonusPoints: 100 # How many points can be earned for every clean lap made at/above NeededCleanLaps
 Metrics: # Point earning and deductions
   StartingPoints: 500 # How many points new players start with
-  PointsDeductInvalidLap: 250 # How many points players lose for completing an invalid lap
-  PointsDeductPitReEnter: 200 # How many points players lose for re-entering pits (at tolls)
+  PointsDeductLeavePits: 3 # How many points players "pay" for leaving pits
+  PointsDeductInvalidLap: 25 # How many points players lose for completing an invalid lap
+  PointsDeductPitReEnter: 50 # How many points players lose for re-entering pits (at tolls)
   PointsDeductBySpeedFactor: 1.4 # Calculating how many points to take in a collision. Lower = more points, higher = less points
   PointsDeductCollisionMax: 400 # The maximum amount of points a player can lose from a collision
   PointsRewardPerLap: 30 # How many points players earn for completing each clean lap
