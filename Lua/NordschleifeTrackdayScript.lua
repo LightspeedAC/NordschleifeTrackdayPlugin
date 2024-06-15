@@ -192,7 +192,7 @@ function script.update(dt)
 
     if cutTimeout > 0 then
         cutTimeout = cutTimeout - dt
-    elseif player.speedKmh > 0 and player.wheelsOutside > 3 then
+    elseif player.speedKmh > 1 and player.wheelsOutside > 3 then
         onCut { Speed = player.speedKmh }
         cutTimeout = 1
     end

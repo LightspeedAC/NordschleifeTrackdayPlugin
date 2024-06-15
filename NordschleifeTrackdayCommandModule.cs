@@ -1,7 +1,6 @@
 using AssettoServer.Commands;
 using AssettoServer.Network.Tcp;
 using AssettoServer.Shared.Network.Packets.Shared;
-using NordschleifeTrackdayPlugin.Packets;
 using NordschleifeTrackdayPlugin.Session;
 using Qmmands;
 
@@ -44,7 +43,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        session.AddPoints(i);
+        session.AddPoints(i, false);
         Reply(providedOther ? $"Gave {i} points to @{driver?.Name}." : $"Added {i} points.");
         driver?.SendPacket(new ChatMessage
         {
@@ -87,6 +86,122 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         {
             SessionId = 255,
             Message = $"{i} points were taken from you by @{Client.Name}!"
+        });
+    }
+
+    [Command("ca")]
+    public void CreateAdmin(ACTcpClient driver)
+    {
+        if (Client == null)
+        {
+            return;
+        }
+
+        if (!NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid))
+        {
+            Reply("You have no access to this command!");
+            return;
+        }
+
+        if (driver.Guid == Client.Guid)
+        {
+            Reply("You can't use this command on yourself!");
+            return;
+        }
+
+        NordschleifeTrackdayPlugin.AddAdmin(driver.Guid);
+        Reply($"You set {driver.Name} as an admin (temp).");
+        driver.SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"You are now an admin!"
+        });
+    }
+
+    [Command("ra")]
+    public void RemoveAdmin(ACTcpClient driver)
+    {
+        if (Client == null)
+        {
+            return;
+        }
+
+        if (!NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid))
+        {
+            Reply("You have no access to this command!");
+            return;
+        }
+
+        if (driver.Guid == Client.Guid)
+        {
+            Reply("You can't use this command on yourself!");
+            return;
+        }
+
+        NordschleifeTrackdayPlugin.RemoveAdmin(driver.Guid);
+        Reply($"You removed {driver.Name} as an admin (temp).");
+        driver.SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"You are no longer an admin!"
+        });
+    }
+
+    [Command("ccl")]
+    public void CreateConvoyLeader(ACTcpClient driver)
+    {
+        if (Client == null)
+        {
+            return;
+        }
+
+        if (!NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid))
+        {
+            Reply("You have no access to this command!");
+            return;
+        }
+
+        if (driver.Guid == Client.Guid)
+        {
+            Reply("You can't use this command on yourself!");
+            return;
+        }
+
+        NordschleifeTrackdayPlugin.AddConvoyLeader(driver.Guid);
+        Reply($"You set {driver.Name} as a convoy leader (temp).");
+        driver.SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"You are now a convoy leader!"
+        });
+    }
+
+    [Command("rcl")]
+    public void RemoveConvoyLeader(ACTcpClient driver)
+    {
+        if (Client == null)
+        {
+            return;
+        }
+
+        if (!NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid))
+        {
+            Reply("You have no access to this command!");
+            return;
+        }
+
+        if (driver.Guid == Client.Guid)
+        {
+            Reply("You can't use this command on yourself!");
+            return;
+        }
+
+        NordschleifeTrackdayPlugin.RemoveConvoyLeader(driver.Guid);
+        Reply($"You removed {driver.Name} as a convoy leader (temp).");
+        driver.SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"You are no longer a convoy leader!"
         });
     }
 
@@ -280,6 +395,10 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         {
             Reply("- /afp[args: int, driver(opt)]: Add points to self or others");
             Reply("- /tfp[args: int, driver(opt)]: Remove points from self or others");
+            Reply("- /ca[args: driver]: Add a temporary admin (doesn't save during server restart)");
+            Reply("- /ra[args: driver]: Temporarily remove an admin (doesn't save during server restart)");
+            Reply("- /ccl[args: driver]: Add a temporary convoy leader (doesn't save during server restart)");
+            Reply("- /rcl[args: driver]: Temporarily remove a convoy leader (doesn't save during server restart)");
         }
     }
 
@@ -421,7 +540,8 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
     [Command("bonuses")]
     public void Bonuses()
     {
-        if (Client == null || NordschleifeTrackdayPlugin._instance == null)
+        var inst = NordschleifeTrackdayPlugin.Instance();
+        if (Client == null || inst == null)
         {
             return;
         }
@@ -433,7 +553,10 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         {
             Reply($"\n- {reward.Item1} clean laps: {reward.Item2} points");
         }
-        Reply($"\n(every other clean lap at/above {NordschleifeTrackdayPlugin._instance._config.ExtraCleanLapBonus.NeededCleanLaps} earns you {NordschleifeTrackdayPlugin._instance._config.ExtraCleanLapBonus.BonusPoints} bonus points)");
+        if (_plugin._config.ExtraCleanLapBonus.Enabled)
+        {
+            Reply($"\n(every other clean lap at/above {inst._config.ExtraCleanLapBonus.NeededCleanLaps} earns you {inst._config.ExtraCleanLapBonus.BonusPoints} bonus points)");
+        }
     }
 
     [Command("status")]
@@ -510,7 +633,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         string carModel = Client.EntryCar.Model;
         uint bestLapTimeToBeat = 0;
         string bestLapTimeToBeatBy = "";
-        foreach (var (key, value) in NordschleifeTrackdayPlugin.BestLapTimes())
+        foreach (var (key, value) in _plugin.BestLapTimes())
         {
             if (key == carModel)
             {
@@ -538,7 +661,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
-        var bestLapTimesSorted = NordschleifeTrackdayPlugin.BestLapTimes()
+        var bestLapTimesSorted = _plugin.BestLapTimes()
             .OrderBy(pair => pair.Value.Item2 < 1 ? uint.MaxValue : pair.Value.Item2)
             .ToDictionary(pair => pair.Key, pair => pair.Value);
         Reply("List of Best Laptimes:");

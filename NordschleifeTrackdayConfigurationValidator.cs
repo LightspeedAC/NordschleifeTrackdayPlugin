@@ -6,7 +6,9 @@ public class NordschleifeTrackdayConfigurationValidator : AbstractValidator<Nord
 {
     public NordschleifeTrackdayConfigurationValidator()
     {
+        RuleFor(cfg => cfg.DatabasePath).NotNull();
         RuleFor(cfg => cfg.Admins).NotNull();
+        RuleFor(cfg => cfg.ConvoyLeaders).NotNull();
         RuleForEach(cfg => cfg.Cars).NotNull().ChildRules(ch =>
         {
             ch.RuleFor(cfg => cfg.Value).GreaterThanOrEqualTo(0);

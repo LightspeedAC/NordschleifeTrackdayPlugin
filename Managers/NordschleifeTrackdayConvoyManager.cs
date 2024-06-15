@@ -63,6 +63,12 @@ public class NordschleifeTrackdayConvoyManager
                     }
                 }
 
+                session.Client().SendPacket(new ChatMessage
+                {
+                    SessionId = 255,
+                    Message = $"Your convoy has started with {possibleDriversCount} drivers, goodluck and have fun!"
+                });
+
                 if (_plugin._config.DiscordWebhook.Enabled)
                 {
                     await NordschleifeTrackdayPlugin.SendDiscordWebhook($"**Convoy started!**\nJoin: {NordschleifeTrackdayPlugin._serverLink}\nLeader: {session.Username()} ({session.Client().EntryCar.Model})\nDrivers: {possibleDriversCount}");
@@ -85,6 +91,11 @@ public class NordschleifeTrackdayConvoyManager
         {
             SessionId = 255,
             Message = $"{NordschleifeTrackdayPlugin.CONVOY_PREFIX}@{session.Username()} ({session.Client().EntryCar.Model}) is starting a convoy! Make sure to meet at pits to earn a convoy bonus of {NordschleifeTrackdayPlugin._pointsRewardConvoy} points for completing a lap with them."
+        });
+        session.Client().SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"{NordschleifeTrackdayPlugin.TIP_PREFIX}Pull up to the ambulance in pits! As you finish waiting and cross that area you'll notice a message notifying other drivers of your convoy being on the move."
         });
         return true;
     }
@@ -209,6 +220,6 @@ public class NordschleifeTrackdayConvoyManager
 
     public bool IsAConvoyLeader(NordschleifeTrackdaySession session)
     {
-        return NordschleifeTrackdayPlugin.Admins().Contains(session.Client().Guid) || (_plugin._config.Extra.AssignConvoyLeadersByPoints && session.Points() >= NordschleifeTrackdayPlugin._pointsNeededForConvoyLeader);
+        return NordschleifeTrackdayPlugin.Admins().Contains(session.Client().Guid) || NordschleifeTrackdayPlugin.ConvoyLeaders().Contains(session.Client().Guid) || (_plugin._config.Extra.AssignConvoyLeadersByPoints && session.Points() >= NordschleifeTrackdayPlugin._pointsNeededForConvoyLeader);
     }
 }

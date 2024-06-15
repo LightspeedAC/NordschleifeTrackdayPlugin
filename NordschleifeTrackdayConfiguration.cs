@@ -4,10 +4,12 @@ namespace NordschleifeTrackdayPlugin;
 
 public class NordschleifeTrackdayConfiguration : IValidateConfiguration<NordschleifeTrackdayConfigurationValidator>
 {
+    public string DatabasePath { get; init; } = "";
     public List<ulong> Admins { get; init; } = [];
-    public Dictionary<string, int> Cars = [];
-    public List<string> StarterCars = [];
-    public Dictionary<int, int> CleanLapBonuses = [];
+    public List<ulong> ConvoyLeaders { get; init; } = [];
+    public Dictionary<string, int> Cars { get; init; } = [];
+    public List<string> StarterCars { get; init; } = [];
+    public Dictionary<int, int> CleanLapBonuses { get; init; } = [];
 
     public MetricsConfiguration Metrics { get; init; } = new();
     public ExtraCleanLapBonusConfiguration ExtraCleanLapBonus { get; init; } = new();

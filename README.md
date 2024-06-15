@@ -1,6 +1,6 @@
 # NordschleifeTrackdayPlugin
 
-An [AssettoServer](https://github.com/compujuckel/AssettoServer "‌") plugin designed for Nurburgring Nordschleife servers! It brings progression for unlocking faster cars, convoys, variable idle kicking, and more.
+An [AssettoServer](https://github.com/compujuckel/AssettoServer "‌") plugin designed for Nurburgring Nordschleife servers! It brings progression for unlocking faster cars, convoys, variable idle kicking, and more. [Live example](https://acstuff.ru/s/q:race/online/join?!ip=204.10.194.151&httpPort=8702)!
 
 ## Configuration
 
@@ -17,12 +17,17 @@ EnablePlugins:
 - NordschleifeTrackdayPlugin
 ```
 
-Add the following plugin configuration to the bottom of your `extra_cfg.yml`
+Add the example plugin configuration to the bottom of your `extra_cfg.yml`
 
 ```yaml
 ---
-!NordschleifeTrackdayConfiguration # List of steam id's for players with special permissions (giving/taking credits, hosting convoys, etc.)
+!NordschleifeTrackdayConfiguration
+# Path for the sqlite file used by this plugin (relative to server directory)
+DatabasePath: "nordschleife_trackday.sqlite"
+# List of steam id's for players with special permissions (giving/taking credits, hosting convoys, etc.)
 Admins: []
+# List of steam id's for players who are designated convoy leaders
+ConvoyLeaders: []
 # List of each car and how many points each requires
 Cars:
   ks_mclaren_p1: 50000
@@ -64,11 +69,13 @@ CleanLapBonuses:
   40: 4500
   50: 5500
   100: 10000
-ExtraCleanLapBonus: # Gives bonus points to players with more than x clean laps (if x is not in the CleanLapBonuses list, and is above NeededCleanLaps)
+# Gives bonus points to players with more than x clean laps (if x is not in the CleanLapBonuses list, and is above NeededCleanLaps)
+ExtraCleanLapBonus:
   Enabled: true
   NeededCleanLaps: 11 # How many clean laps are needed to start earning the point bonus specified below
   BonusPoints: 100 # How many points can be earned for every clean lap made at/above NeededCleanLaps
-Metrics: # Point earning and deductions
+# Point earning and deductions
+Metrics:
   StartingPoints: 500 # How many points new players start with
   PointsDeductLeavePits: 3 # How many points players "pay" for leaving pits
   PointsDeductInvalidLap: 25 # How many points players lose for completing an invalid lap
@@ -79,14 +86,17 @@ Metrics: # Point earning and deductions
   PointsRewardBeatPb: 50 # How many points players earn for beating their personal best lap time
   PointsRewardBeatOtherPb: 75 # How many points players earn for beating the best lap time record (if its set by someone else)
   PointsRewardConvoy: 150 # How many points players earn for completing each clean lap with a convoy
-Announcements: # Automated messages (announcements) in chat
+# Automated messages in chat
+Announcements:
   Enabled: true
   Interval: 600 # In seconds, how often to send an announcement
   Messages: ["If you need help, use /help and ask others for tips.", "Hope you're having fun on our server!"] # Your announcements
-DiscordWebhook: # Plugin sends a Discord webhook for convoys starting & finishing
+# Plugin sends a Discord webhook for convoys starting & finishing
+DiscordWebhook:
   Enabled: true
   WebhookURL: "" # Your Discord webhook URL e.g. "https://discord.com/api/webhooks/x/x"
-IdleKick: # Plugin kicks idle players
+# Plugin kicks idle players
+IdleKick:
   Enabled: true
   DefaultMaxIdleTime: 900 # In seconds, how long players can idle for by default
   LongerMaxIdleTime: 3600 # In seconds, how long players can idle for if they have more clean laps (specified in LongerMaxIdleNeededCleanLaps)
@@ -95,7 +105,7 @@ IdleKick: # Plugin kicks idle players
   LongerMaxIdleNeededCleanLaps: 5 # How many clean laps are needed to be able to idle longer
 Extra:
   DoublePointWeekend: true # Whether to enable doubling points on weekends (every Saturday)
-  ImmediateKickCarNotUnlocked: false # Whether to kick players on join for joining in a car they can't drive. If set to false, they'll be kicked after 30 seconds and during that time they cant drive the car, move, etc.
+  ImmediateKickCarNotUnlocked: false # Whether to kick players on join for joining in a car they can't drive. If set to false, they'll be kicked after 30 seconds and during that time they can't drive the car, move, etc.
   AssignConvoyLeadersByPoints: true # Whether to allow players to become convoy leaders by accumulating points
   ConvoyLeadersNeededPoints: 6500 # How many points players need to become a convoy leader (if AssignConvoyLeadersByPoints is set to true)
 ```
@@ -123,6 +133,7 @@ Available point bonuses:
 - Participating in and finishing a clean lap with a convoy
 - Beating your personal best lap time
 - Beating the best lap time record
+- Earning points during double points weekend
 
 ### Convoys
 
@@ -161,3 +172,7 @@ Automated messages sent by the server at a specified interval.
 - `/tl`: Shows the player’s total laps
 - `/afp`: Give points to self or others (for admins)
 - `/tfp`: Remove points from self or others (for admins)
+- `/ca`: Add a temporary admin which is reset on server restart (for admins)
+- `/ra`: Temporarily remove an admin which is reset on server restart (for admins)
+- `/ccl`: Add a temporary convoy leader which is reset on server restart (for admins)
+- `/rcl`: Temporarily remove a convoy leader which is reset on server restart (for admins)

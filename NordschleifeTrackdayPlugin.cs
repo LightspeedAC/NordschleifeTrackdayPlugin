@@ -32,10 +32,10 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     public const string ANNOUNCEMENT_PREFIX = "SERVER > ";
 
     public const string NO_NAME = "Unknown";
-    public const string DATABASE_FILE = "nordschleife_trackday.sqlite";
-    public SQLiteConnection _database = new($"Data Source={DATABASE_FILE};Version=3;");
+    public const string DEFAULT_DATABASE_FILE = "nordschleife_trackday.sqlite";
+    public SQLiteConnection _database = new();
 
-    public static NordschleifeTrackdayPlugin? _instance;
+    private static NordschleifeTrackdayPlugin? _instance;
     public readonly EntryCarManager _entryCarManager;
     public readonly SessionManager _asSessionManager;
     public readonly WeatherManager _weatherManager;
@@ -48,10 +48,12 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
     private bool _warnedSessionEnd = false;
     private readonly Queue<(ulong, long)> _recentLapStarts = [];//used to determine if a starting convoy is empty and should be ended 
-    private static readonly Dictionary<string, (string, uint)> _bestLapTimes = [];
+    private readonly Dictionary<string, (string, uint)> _bestLapTimes = [];
     private int _currentAnnouncementIndex = 0;
 
+    private static string _databasePath = "";
     private static readonly List<ulong> _admins = [];
+    private static readonly List<ulong> _convoyLeaders = [];
     private static readonly List<(string, int)> _cars = [];
     private static readonly List<string> _starterCars = [];
     private static readonly List<(int, int)> _prominentCleanLapRewards = [];
@@ -75,10 +77,14 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         Log.Information($"{PLUGIN_NAME} - Jonfinity");
         Log.Information("--------------------------------------");
 
+        _config = nordschleifeTrackdayConfiguration;
+        LoadFromConfig(geoParamsManager, acServerConfiguration);
+        StartDatabase();
+        _instance = this;
+
         _entryCarManager = entryCarManager;
         _asSessionManager = sessionManager;
         _weatherManager = weatherManager;
-        _config = nordschleifeTrackdayConfiguration;
         _sessionManager = new NordschleifeTrackdaySessionManager(this);
         _convoyManager = new NordschleifeTrackdayConvoyManager(this);
 
@@ -116,42 +122,57 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         System.Timers.Timer timer = new(_config.Announcements.Interval * 1000);
         timer.Elapsed += new System.Timers.ElapsedEventHandler(DoAnnouncements);
         timer.Start();
+    }
 
-        LoadFromConfig(geoParamsManager, acServerConfiguration);
-        StartDatabase();
-        _instance = this;
+    public static NordschleifeTrackdayPlugin? Instance()
+    {
+        return _instance;
     }
 
     private void LoadFromConfig(GeoParamsManager geoParamsManager, ACServerConfiguration acServerConfiguration)
     {
         Task.Delay(10 * 1000).ContinueWith((_) => _serverLink = $"https://acstuff.ru/s/q:race/online/join?ip={geoParamsManager.GeoParams.Ip}&httpPort={acServerConfiguration.Server.HttpPort}");//geoParamsManager.GeoParams isnt populated immediately
 
+        _databasePath = _config.DatabasePath;
+        if (_databasePath == "")
+        {
+            _databasePath = DEFAULT_DATABASE_FILE;
+        }
+
         foreach (var guid in _config.Admins)
         {
-            Log.Information($"{PLUGIN_PREFIX}Found admin `{guid}`..");
             _admins.Add(guid);
         }
-        Log.Information($"{PLUGIN_PREFIX}Found ({_config.Admins.Count}) admins.");
+        Log.Information($"{PLUGIN_PREFIX}Found ({_config.Admins.Count}) admins..");
+
+        foreach (var guid in _config.ConvoyLeaders)
+        {
+            _admins.Add(guid);
+        }
+        Log.Information($"{PLUGIN_PREFIX}Found ({_config.ConvoyLeaders.Count}) convoy leaders..");
 
         foreach (var item in _config.CleanLapBonuses)
         {
-            Log.Information($"{PLUGIN_PREFIX}Found clean lap bonus at `{item.Key}` for `{item.Value}` points..");
             _prominentCleanLapRewards.Add(new(item.Key, item.Value));
         }
-        Log.Information($"{PLUGIN_PREFIX}Found ({_config.CleanLapBonuses.Count}) clean lap bonuses.");
-
-        foreach (var item in _config.Cars)
-        {
-            string starterCarStr = _config.StarterCars.Contains(item.Key) ? " (starter)" : "";
-            Log.Information($"{PLUGIN_PREFIX}Found car `{item.Key}` with `{item.Value}` points..");
-            _cars.Add(new(item.Key, item.Value));
-        }
-        Log.Information($"{PLUGIN_PREFIX}Found ({_config.Cars.Count}) cars.");
+        Log.Information($"{PLUGIN_PREFIX}Found ({_config.CleanLapBonuses.Count}) clean lap bonuses..");
 
         foreach (var message in _config.Announcements.Messages)
         {
             _announcements.Add(message);
         }
+        Log.Information($"{PLUGIN_PREFIX}Found ({_config.Announcements.Messages.Count}) announcements..");
+
+        int starterCars = 0;
+        foreach (var item in _config.Cars)
+        {
+            if (_config.StarterCars.Contains(item.Key))
+            {
+                starterCars++;
+            }
+            _cars.Add(new(item.Key, item.Value));
+        }
+        Log.Information($"{PLUGIN_PREFIX}Found ({_config.Cars.Count}) cars ({starterCars} starter)..");
 
         _pointsNeededForConvoyLeader = _config.Extra.ConvoyLeadersNeededPoints;
         _pointsStarting = _config.Metrics.StartingPoints;
@@ -166,39 +187,19 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         _pointsRewardConvoy = _config.Metrics.PointsRewardConvoy;
     }
 
-    private void DoAnnouncements(object? sender, EventArgs args)
-    {
-        if (_asSessionManager.ServerTimeMilliseconds < 60000)
-        {
-            return;
-        }
-
-        long currentSessionTime = _asSessionManager.CurrentSession.SessionTimeMilliseconds;
-        if (!_warnedSessionEnd && (currentSessionTime + 360000) >= _asSessionManager.CurrentSession.TimeLeftMilliseconds)
-        {
-            _entryCarManager.BroadcastPacket(new ChatMessage
-            {
-                SessionId = 255,
-                Message = $"{ANNOUNCEMENT_PREFIX}The server session ends in 6 minutes, you'll be teleported to pits shortly."
-            });
-            Log.Information($"{PLUGIN_PREFIX}Just warned of nearing server session end in 6 mins!");
-            _warnedSessionEnd = true;
-        }
-
-        _entryCarManager.BroadcastPacket(new ChatMessage
-        {
-            SessionId = 255,
-            Message = $"{ANNOUNCEMENT_PREFIX}{_announcements[_currentAnnouncementIndex]}"
-        });
-        _currentAnnouncementIndex = (_currentAnnouncementIndex + 1) % _announcements.Count;
-    }
-
     private void StartDatabase()
     {
-        if (!File.Exists(DATABASE_FILE))
+        string? path = Path.GetDirectoryName(_databasePath);
+        if (!string.IsNullOrEmpty(path) && !Directory.Exists(path))
         {
-            SQLiteConnection.CreateFile(DATABASE_FILE);
+            Directory.CreateDirectory(path);
         }
+        if (!File.Exists(_databasePath))
+        {
+            SQLiteConnection.CreateFile(_databasePath);
+        }
+        Log.Information($"{PLUGIN_PREFIX}Found database file at \"{_databasePath}\"..");
+        _database = new($"Data Source={_databasePath};Version=3;");
         _database.Open();
 
         using (var command = new SQLiteCommand($"CREATE TABLE IF NOT EXISTS users (id INT PRIMARY KEY, name VARCHAR(255) NOT NULL, country VARCHAR(255) NOT NULL, points INT NOT NULL DEFAULT {_pointsStarting}, clean_lap_streak INT NOT NULL, last_clean_lap datetime DEFAULT '1970-01-02 00:00:00', cuts INT NOT NULL DEFAULT 0, collisions INT NOT NULL DEFAULT 0)", _database))
@@ -228,9 +229,61 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         }
     }
 
+    private void DoAnnouncements(object? sender, EventArgs args)
+    {
+        if (_asSessionManager.ServerTimeMilliseconds < 60000)
+        {
+            return;
+        }
+
+        long currentSessionTime = _asSessionManager.CurrentSession.SessionTimeMilliseconds;
+        if (!_warnedSessionEnd && (currentSessionTime + 360000) >= _asSessionManager.CurrentSession.TimeLeftMilliseconds)
+        {
+            _entryCarManager.BroadcastPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = $"{ANNOUNCEMENT_PREFIX}The server session ends in 6 minutes, you'll be teleported to pits shortly."
+            });
+            Log.Information($"{PLUGIN_PREFIX}Just warned of nearing server session end in 6 mins!");
+            _warnedSessionEnd = true;
+        }
+
+        _entryCarManager.BroadcastPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"{ANNOUNCEMENT_PREFIX}{_announcements[_currentAnnouncementIndex]}"
+        });
+        _currentAnnouncementIndex = (_currentAnnouncementIndex + 1) % _announcements.Count;
+    }
+
     public static List<ulong> Admins()
     {
         return _admins;
+    }
+
+    public static void AddAdmin(ulong guid)
+    {
+        _admins.Add(guid);
+    }
+
+    public static void RemoveAdmin(ulong guid)
+    {
+        _admins.Remove(guid);
+    }
+
+    public static List<ulong> ConvoyLeaders()
+    {
+        return _convoyLeaders;
+    }
+
+    public static void AddConvoyLeader(ulong guid)
+    {
+        _convoyLeaders.Add(guid);
+    }
+
+    public static void RemoveConvoyLeader(ulong guid)
+    {
+        _convoyLeaders.Remove(guid);
     }
 
     public static List<(string, int)> Cars()
@@ -287,7 +340,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         return _recentLapStarts;
     }
 
-    public static Dictionary<string, (string, uint)> BestLapTimes()
+    public Dictionary<string, (string, uint)> BestLapTimes()
     {
         return _bestLapTimes;
     }
@@ -473,6 +526,11 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
                     SessionId = 255,
                     Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is approaching the finish line! Make sure to pass them and cross the finish line to claim your convoy bonus."
                 });
+                client.SendPacket(new ChatMessage
+                {
+                    SessionId = 255,
+                    Message = $"{TIP_PREFIX}Hey convoy leader! Turn on your hazards, slowly let off the gas and pull off to the right where the concrete is!"
+                });
                 break;
             }
         }
@@ -523,6 +581,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             }
         }
     }
+
     private void IncomingConvoyAtAirfield(ACTcpClient client, PacketReader reader)
     {
         NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
@@ -547,6 +606,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             }
         }
     }
+
     private void IncomingConvoyAtFoxhole(ACTcpClient client, PacketReader reader)
     {
         NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
@@ -571,6 +631,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             }
         }
     }
+
     private void IncomingConvoyAtKallenForest(ACTcpClient client, PacketReader reader)
     {
         NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
@@ -595,6 +656,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             }
         }
     }
+
     private void IncomingConvoyAtWaterMill(ACTcpClient client, PacketReader reader)
     {
         NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
@@ -619,6 +681,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             }
         }
     }
+
     private void IncomingConvoyAtLittleValley(ACTcpClient client, PacketReader reader)
     {
         NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
@@ -643,6 +706,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             }
         }
     }
+
     private void IncomingConvoyAtFirstCarousel(ACTcpClient client, PacketReader reader)
     {
         NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
@@ -667,6 +731,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             }
         }
     }
+
     private void IncomingConvoyAtBrunnchen(ACTcpClient client, PacketReader reader)
     {
         NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
@@ -691,6 +756,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             }
         }
     }
+
     private void IncomingConvoyAtSecondCarousel(ACTcpClient client, PacketReader reader)
     {
         NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);

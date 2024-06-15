@@ -292,7 +292,7 @@ public sealed class NordschleifeTrackdaySession
             _plugin._entryCarManager.BroadcastPacket(new ChatMessage
             {
                 SessionId = 255,
-                Message = $"@{_client.Name} just earned a {_cleanLaps} clean laps bonus of {reward} points!"
+                Message = $"@{_client.Name} just did {_cleanLaps} clean laps and earned a bonus of {reward} points!"
             });
         }
     }
