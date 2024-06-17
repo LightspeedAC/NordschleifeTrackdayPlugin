@@ -151,8 +151,6 @@ function DoUpdate(dt)
     local speed = ((currentPosition - lastPosition):length() / dt)
     if speed > toTeleportMaxSpeedThreshold and (isWithinPits(currentPosition)) then
         onPitTeleport { id = carIndex }
-        ac.debug("Teleport Det (Pos)", currentPosition)
-        ac.debug("Teleport Det (Speed)", ac.getCarState(carIndex + 1).speedKmh)
     end
 
     local checkpoints = {

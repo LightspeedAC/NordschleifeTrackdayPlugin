@@ -165,6 +165,7 @@ Automated messages sent by the server at a specified interval.
 - `/bonuses`: Shows the list of available bonus points players can earn
 - `/status`: Indicates the player's lap status (clean or not), their clean laps streak, points, cuts and collisions
 - `/points`: Shows the player their points
+- `/tpoints`: Shows a list of players with the most points
 - `/pb`: Shows the player their best lap time with their current car
 - `/best`: Shows the best lap time record for the player’s current car
 - `/allbest`: Show the best lap time records for every car

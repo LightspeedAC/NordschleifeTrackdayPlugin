@@ -16,6 +16,7 @@ using AssettoServer.Server.Weather;
 using System.Text.Json;
 using System.Text;
 using AssettoServer.Server.GeoParams;
+using AssettoServer.Shared.Network.Packets.Incoming;
 
 namespace NordschleifeTrackdayPlugin;
 
@@ -23,6 +24,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 {
     public const int CONVOY_MIN_DRIVERS_NEEDED_ADMIN = 1;
     public const int CONVOY_MIN_DRIVERS_NEEDED = 2;
+    public const int LEADERBOARD_MAX_ENTRIES = 15;
 
     public const string PLUGIN_NAME = "NordschleifeTrackdayPlugin";
     public const string PLUGIN_PREFIX = $"[{PLUGIN_NAME}] ";
@@ -49,6 +51,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     private bool _warnedSessionEnd = false;
     private readonly Queue<(ulong, long)> _recentLapStarts = [];//used to determine if a starting convoy is empty and should be ended 
     private readonly Dictionary<string, (string, uint)> _bestLapTimes = [];
+    private Dictionary<ulong, (string, int)> _pointsLeaderboard = [];
     private int _currentAnnouncementIndex = 0;
 
     private static string _databasePath = "";
@@ -87,6 +90,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         _weatherManager = weatherManager;
         _sessionManager = new NordschleifeTrackdaySessionManager(this);
         _convoyManager = new NordschleifeTrackdayConvoyManager(this);
+        applicationLifetime.ApplicationStopping.Register(ApplicationStopping);
 
         if (!acServerConfiguration.Extra.EnableClientMessages)
         {
@@ -122,6 +126,18 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         System.Timers.Timer timer = new(_config.Announcements.Interval * 1000);
         timer.Elapsed += new System.Timers.ElapsedEventHandler(DoAnnouncements);
         timer.Start();
+
+        System.Timers.Timer leaderboardTimer = new(1800 * 1000);
+        timer.Elapsed += new System.Timers.ElapsedEventHandler(UpdateLeaderboard);
+        timer.Start();
+    }
+
+    private void ApplicationStopping()
+    {
+        foreach (var session in _sessionManager.GetSessions())
+        {
+            session.Value.OnRemove();
+        }
     }
 
     public static NordschleifeTrackdayPlugin? Instance()
@@ -227,6 +243,8 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             }
             _bestLapTimes.Add(car.Item1, (username, lapTime));
         }
+
+        _pointsLeaderboard = GetPointsLeaderboard();
     }
 
     private void DoAnnouncements(object? sender, EventArgs args)
@@ -254,6 +272,11 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             Message = $"{ANNOUNCEMENT_PREFIX}{_announcements[_currentAnnouncementIndex]}"
         });
         _currentAnnouncementIndex = (_currentAnnouncementIndex + 1) % _announcements.Count;
+    }
+
+    private void UpdateLeaderboard(object? sender, EventArgs args)
+    {
+        _pointsLeaderboard = GetPointsLeaderboard();
     }
 
     public static List<ulong> Admins()
@@ -842,11 +865,6 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             convoy.RemoveFinishingDriver(client.Guid);
         }
 
-        if (_convoyManager.OnlineConvoyLeaders().Contains(client.Name))
-        {
-            _convoyManager.OnlineConvoyLeaders().Remove(client.Name);
-        }
-
         if (_convoyManager.RemoveOnlineConvoyLeader(session))
         {
             _entryCarManager.BroadcastPacket(new ChatMessage
@@ -1120,6 +1138,29 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
                 await Task.Delay(delay);
             }
         }
+    }
+
+    public Dictionary<ulong, (string, int)> Leaderboard()
+    {
+        return _pointsLeaderboard;
+    }
+
+    private Dictionary<ulong, (string, int)> GetPointsLeaderboard()
+    {
+        Dictionary<ulong, (string, int)> leaderboard = [];
+        using (var command = new SQLiteCommand($"SELECT id, name, points FROM users ORDER BY points DESC LIMIT 0,{LEADERBOARD_MAX_ENTRIES}", _database))
+        {
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                ulong id = Convert.ToUInt64(reader["id"]);
+                string name = reader["name"].ToString() ?? NO_NAME;
+                int points = Convert.ToInt32(reader["points"]);
+                leaderboard.Add(id, (name, points));
+            }
+        }
+
+        return leaderboard;
     }
 
     public void CreateLaptime(ACTcpClient client, uint time, int speed)

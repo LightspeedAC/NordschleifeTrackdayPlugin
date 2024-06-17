@@ -36,7 +36,7 @@ public class NordschleifeTrackdayConvoyManager
         ulong convoyLeaderGuid = session.Client().Guid;
         if (convoyLeaderDriver != null)
         {
-            List<ulong> possibleDrivers = [69, 420];
+            List<ulong> possibleDrivers = [];
             foreach (var recentLap in _plugin.RecentLapStarts())
             {
                 if (convoyLeaderGuid != recentLap.Item1 && !possibleDrivers.Contains(recentLap.Item1) && convoy.IsStartTimeValid(convoy.StartedTimeMs()))

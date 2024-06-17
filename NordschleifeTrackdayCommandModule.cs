@@ -386,6 +386,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         Reply("- /bonuses: See a list of bonus points you can earn");
         Reply("- /status: See if you're clean, your clean laps streak, points, cuts and collisions");
         Reply("- /points: See your points");
+        Reply("- /tpoints: See a list of drivers with the most points");
         Reply($"- /pb: See your best lap time with the {Client.EntryCar.Model}");
         Reply($"- /best: See the best lap time record for the {Client.EntryCar.Model}");
         Reply("- /allbest: See the best lap time records for every car on the server");
@@ -595,6 +596,23 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         }
 
         Reply($"You have {session.Points()} points.");
+    }
+
+    [Command("tpoints")]
+    public void TopPoints()
+    {
+        Reply("Richest Drivers:");
+        int i = 1;
+        foreach (var entry in _plugin.Leaderboard())
+        {
+            Reply($"{i}. @{entry.Value.Item1} - {entry.Value.Item2} points");
+            i++;
+
+            if (i > NordschleifeTrackdayPlugin.LEADERBOARD_MAX_ENTRIES)
+            {
+                break;
+            }
+        }
     }
 
     [Command("pb")]
