@@ -15,7 +15,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         _plugin = plugin;
     }
 
-    [Command("afp")]
+    [Command("afp", "addpoints")]
     public void AddFakePoints(int i = 0, ACTcpClient? driver = null)
     {
         if (Client == null)
@@ -52,7 +52,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         });
     }
 
-    [Command("tfp")]
+    [Command("tfp", "takepoints")]
     public void TakeFakePoints(int i = 0, ACTcpClient? driver = null)
     {
         if (Client == null)
@@ -89,7 +89,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         });
     }
 
-    [Command("ca")]
+    [Command("ca", "createadmin")]
     public void CreateAdmin(ACTcpClient driver)
     {
         if (Client == null)
@@ -118,7 +118,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         });
     }
 
-    [Command("ra")]
+    [Command("ra", "removeadmin")]
     public void RemoveAdmin(ACTcpClient driver)
     {
         if (Client == null)
@@ -147,7 +147,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         });
     }
 
-    [Command("ccl")]
+    [Command("ccl", "createconvoyleader")]
     public void CreateConvoyLeader(ACTcpClient driver)
     {
         if (Client == null)
@@ -176,7 +176,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         });
     }
 
-    [Command("rcl")]
+    [Command("rcl", "removeconvoyleader")]
     public void RemoveConvoyLeader(ACTcpClient driver)
     {
         if (Client == null)
@@ -205,10 +205,10 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         });
     }
 
-    [Command("cs")]
+    [Command("cs", "convoystart", "startconvoy")]
     public void ConvoyStart()
     {
-        if (Client == null || Client.Name == null)
+        if (Client == null)
         {
             return;
         }
@@ -238,33 +238,55 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         }
     }
 
-    [Command("ce")]
-    public void ConvoyEnd()
+    [Command("ce", "convoyend", "endconvoy")]
+    public void ConvoyEnd(ACTcpClient? driverConvoyLeader = null)
     {
-        if (Client == null || Client.Name == null)
+        if (Client == null)
         {
             return;
         }
 
-        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(driverConvoyLeader?.Guid ?? Client.Guid);
         if (session == null)
         {
             return;
         }
 
-        if (!_plugin._convoyManager.IsAConvoyLeader(session))
+        string? name = driverConvoyLeader?.Name;
+        bool otherProvied = name != null;
+        if (otherProvied)
         {
-            Reply("You have no access to this command!");
-            return;
+            if (!NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid))
+            {
+                Reply("You can't end another driver's convoy!");
+                return;
+            }
+
+            Reply($"You ended {name}'s convoy.");
+            driverConvoyLeader?.SendPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = $"Your convoy was ended by {Client.Name}."
+            });
+        }
+        else
+        {
+            if (!_plugin._convoyManager.IsAConvoyLeader(session))
+            {
+                Reply("You have no access to this command!");
+                return;
+            }
+
+            Reply("Your convoy was ended.");
         }
 
         _ = _plugin._convoyManager.EndConvoyAsync(session, false);
     }
 
-    [Command("ct")]
+    [Command("ct", "convoytransfer", "transferconvoy")]
     public async void ConvoyTransfer(ACTcpClient driver, ACTcpClient? driverConvoyLeader = null)
     {
-        if (Client == null || Client.Name == null || driver.Name == null)
+        if (Client == null)
         {
             return;
         }
@@ -312,8 +334,8 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         {
             if (convoy.Key == search.Guid)
             {
-                ssn.SetHostingConvoy(false);
-                otherSession.SetHostingConvoy(true);
+                ssn.SetHostingConvoy(null);
+                otherSession.SetHostingConvoy(convoy.Value);
                 _plugin._convoyManager.RemoveConvoy(search.Guid);
                 _plugin._convoyManager.AddConvoy(otherSession, convoy.Value.FinishingDrivers(), convoy.Value.StartingDrivers());
                 success = true;
@@ -321,7 +343,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             }
         }
 
-        string name = driverConvoyLeader != null ? driverConvoyLeader?.Name ?? NordschleifeTrackdayPlugin.NO_NAME : Client.Name;
+        string name = driverConvoyLeader != null ? driverConvoyLeader?.Name ?? NordschleifeTrackdayPlugin.NO_NAME : Client?.Name ?? NordschleifeTrackdayPlugin.NO_NAME;
         if (!success)
         {
             Reply(driverConvoyLeader != null ? $"{driverConvoyLeader.Name} is not currently hosting a convoy." : "You're not currently hosting a convoy.");
@@ -347,6 +369,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             return;
         }
 
+        bool isAdmin = NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid);
         Reply("Basics:");
         Reply($"Convoys can only be started from pits, and by a few drivers. Each convoy must have at least {NordschleifeTrackdayPlugin.CONVOY_MIN_DRIVERS_NEEDED} participating drivers to give out rewards on lap completion. That reward is {NordschleifeTrackdayPlugin._pointsRewardConvoy} points.");
         Reply($"Covnoy leaders must keep a steady pace (8-9 minute lap) and ensure they can complete the entire lap without disconnecting, or having a collision. This is because many people may be relying on them for points, bonus, etc.!");
@@ -359,8 +382,11 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         Reply($"To host convoys, you require {NordschleifeTrackdayPlugin._pointsNeededForConvoyLeader}+ points! As you hit the required points, you'll be automatically able to start and end your own convoys. Abusing this system can result in the reset and ban of your account!");
         Reply("Commands:");
         Reply("- /cs: Start a convoy");
-        Reply("- /ce: End your convoy");
-        Reply("- /ct[args: driver, driverConvoyLeader(opt)]: Transfer leadership of your convoy to another driver, or the leadership of another convoy to another driver");
+        Reply($"- /ce: End your convoy{(isAdmin ? ", or another convoy" : "")}");
+        if (isAdmin)
+        {
+            Reply("- /ct[args: driver, driverConvoyLeader(opt)]: Transfer leadership of your convoy to another driver, or the leadership of another convoy to another driver");
+        }
     }
 
     [Command("help")]
@@ -382,9 +408,11 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         Reply("- /chelp: See the convoy help command");
         Reply("- /convoys: See a list of online convoy leaders and any ongoing convoys");
         Reply("- /convoy[args: driver]: See info on a specific convoy, like when it started and its drivers");
-        Reply("- /cars: See the list of cars, how many points each of them require, and whether you have unlocked them");
+        Reply("- /cars: See the list of cars, how many points each of them require, and whether you've unlocked them");
+        Reply("- /next2unlock: See a list of cars you're about to unlock");
+        Reply("- /unlocked: See a list of cars you've already unlocked");
         Reply("- /bonuses: See a list of bonus points you can earn");
-        Reply("- /status: See if you're clean, your clean laps streak, points, cuts and collisions");
+        Reply("- /status: See your lap status, your clean laps, points, and cuts/collisions");
         Reply("- /points: See your points");
         Reply("- /tpoints: See a list of drivers with the most points");
         Reply($"- /pb: See your best lap time with the {Client.EntryCar.Model}");
@@ -403,7 +431,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         }
     }
 
-    [Command("convoys")]
+    [Command("convoys", "cys")]
     public void Convoys()
     {
         if (Client == null)
@@ -430,16 +458,24 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
             Reply("Ongoing Convoys:");
             foreach (var convoy in convoys)
             {
-                string startedStr = convoy.Value.HasStarted() ? "started" : "waiting";
+                string startedStr = "waiting";
+                if (convoy.Value.HasStarted())
+                {
+                    startedStr = "started";
+                }
+                else if (convoy.Value.IsOnMove())
+                {
+                    startedStr = "on the move";
+                }
                 Reply($"\n- {convoy.Value.Leader().Username()} ({startedStr}): {convoy.Value.StartingDrivers().Count} drivers");
             }
         }
     }
 
-    [Command("convoy")]
+    [Command("convoy", "cy")]
     public void ConvoyInfo(ACTcpClient driver)
     {
-        if (Client == null || driver.Name == null)
+        if (Client == null)
         {
             return;
         }
@@ -522,23 +558,80 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
         if (session == null)
         {
-            foreach (var car in NordschleifeTrackdayPlugin.Cars())
+            return;
+        }
+
+        foreach (var car in NordschleifeTrackdayPlugin.Cars())
+        {
+            int diff = Math.Abs(session.Points() - car.Item2);
+            string unlockedStr = session.Points() >= car.Item2 ? "Unlocked" : $"Locked - {diff} more {(diff == 1 ? "point" : "points")}";
+            Reply($"\n- {car.Item1}: {car.Item2} points ({unlockedStr})");
+        }
+    }
+
+    [Command("next2unlock", "cars2unlock")]
+    public void NextCarsToUnlock()
+    {
+        if (Client == null)
+        {
+            return;
+        }
+
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
+        if (session == null)
+        {
+            return;
+        }
+
+        int max = _plugin._config.Extra.Next2UnlockMaxEntries;
+        Reply($"Next ({max}) Cars to Unlock:");
+        int c = 0;
+        var cars = NordschleifeTrackdayPlugin.Cars();
+        cars.Reverse();
+        foreach (var car in cars)
+        {
+            if (session.Points() < car.Item2)
             {
-                Reply($"\n- {car.Item1}: {car.Item2} points");
+                int diff = car.Item2 - session.Points();
+                Reply($"\n- {car.Item1}: {diff} more points");
+                c++;
+                if (c >= max)
+                {
+                    break;
+                }
             }
         }
-        else
+        if (c < 1)
         {
-            foreach (var car in NordschleifeTrackdayPlugin.Cars())
+            Reply($"\n- You've already unlocked every car");
+        }
+    }
+
+    [Command("unlocked", "unlock", "carsunlocked")]
+    public void UnlockedCars()
+    {
+        if (Client == null)
+        {
+            return;
+        }
+
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(Client.Guid);
+        if (session == null)
+        {
+            return;
+        }
+
+        Reply("Unlocked Cars:");
+        foreach (var car in NordschleifeTrackdayPlugin.Cars())
+        {
+            if (session.Points() >= car.Item2)
             {
-                int diff = Math.Abs(session.Points() - car.Item2);
-                string unlockedStr = session.Points() >= car.Item2 ? "Unlocked" : $"Locked - {diff} more {(diff == 1 ? "point" : "points")}";
-                Reply($"\n- {car.Item1}: {car.Item2} points ({unlockedStr})");
+                Reply($"\n- {car.Item1}");
             }
         }
     }
 
-    [Command("bonuses")]
+    [Command("bonuses", "bns")]
     public void Bonuses()
     {
         var inst = NordschleifeTrackdayPlugin.Instance();
@@ -560,7 +653,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         }
     }
 
-    [Command("status")]
+    [Command("status", "sts")]
     public void Status()
     {
         if (Client == null)
@@ -581,7 +674,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         Reply(session.IsClean() ? $"You're clean! You have {cleanLaps} clean {lapsEnglish}, and {session.Points()} points. You have {cuts} cuts and {collisions} collisions." : $"You're NOT clean, you must teleport to pits! You have {cleanLaps} clean {lapsEnglish}, and {session.Points()} points. You have {cuts} cuts and {collisions} collisions.");
     }
 
-    [Command("points")]
+    [Command("points", "pts")]
     public void Points()
     {
         if (Client == null)
@@ -598,7 +691,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         Reply($"You have {session.Points()} points.");
     }
 
-    [Command("tpoints")]
+    [Command("tpoints", "tpts")]
     public void TopPoints()
     {
         Reply("Richest Drivers:");
@@ -615,7 +708,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         }
     }
 
-    [Command("pb")]
+    [Command("pb", "personalbest", "mybest")]
     public void PersonalBest()
     {
         if (Client == null)
@@ -634,7 +727,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         Reply(bestLapTime > 0 ? $"Your best lap time with the {Client.EntryCar.Model} is {bestLapTimeStr}." : $"You haven't yet completed a clean lap with the {Client.EntryCar.Model}, now is the time!");
     }
 
-    [Command("best")]
+    [Command("best", "fastest")]
     public void Best()
     {
         if (Client == null)
@@ -665,7 +758,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         Reply(bestLapTimeToBeat < 1 ? $"There's no lap time set for the {carModel} yet! You can be the first to set it." : $"The best lap time with the {carModel} is {lapTimeStr} by @{bestLapTimeToBeatBy}{yourselfStr}!");
     }
 
-    [Command("allbest")]
+    [Command("allbest", "ab")]
     public void AllBest()
     {
         if (Client == null)
@@ -682,7 +775,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         var bestLapTimesSorted = _plugin.BestLapTimes()
             .OrderBy(pair => pair.Value.Item2 < 1 ? uint.MaxValue : pair.Value.Item2)
             .ToDictionary(pair => pair.Key, pair => pair.Value);
-        Reply("List of Best Laptimes:");
+        Reply("List of Best Lap Times:");
         foreach (var (key, value) in bestLapTimesSorted)
         {
             string carModel = key;
@@ -694,7 +787,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         }
     }
 
-    [Command("cl")]
+    [Command("cl", "laps", "cleanlaps")]
     public void CleanLaps()
     {
         if (Client == null)
@@ -724,7 +817,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         Reply(session.CleanLaps() > 0 ? $"You currently have {cleanLaps} clean {lapsEnglish}. Your most recent clean lap was completed {timeEnglish}." : $"You currently have no clean lap streak.");
     }
 
-    [Command("tl")]
+    [Command("tl", "totallaps")]
     public void TotalLaps()
     {
         if (Client == null)

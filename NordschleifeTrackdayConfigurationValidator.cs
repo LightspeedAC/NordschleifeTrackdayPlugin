@@ -62,6 +62,7 @@ public class NordschleifeTrackdayConfigurationValidator : AbstractValidator<Nord
         {
             ch.RuleFor(cfg => cfg.DoublePointWeekend).NotNull();
             ch.RuleFor(cfg => cfg.ImmediateKickCarNotUnlocked).NotNull();
+            ch.RuleFor(cfg => cfg.Next2UnlockMaxEntries).GreaterThanOrEqualTo(1);
             ch.RuleFor(cfg => cfg.AssignConvoyLeadersByPoints).NotNull();
             ch.RuleFor(cfg => cfg.ConvoyLeadersNeededPoints).GreaterThanOrEqualTo(1);
         });

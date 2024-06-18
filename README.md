@@ -106,6 +106,7 @@ IdleKick:
 Extra:
   DoublePointWeekend: true # Whether to enable doubling points on weekends (every Saturday)
   ImmediateKickCarNotUnlocked: false # Whether to kick players on join for joining in a car they can't drive. If set to false, they'll be kicked after 30 seconds and during that time they can't drive the car, move, etc.
+  Next2UnlockMaxEntries: 6 # How many cars are shown to the player when they run /next2unlock
   AssignConvoyLeadersByPoints: true # Whether to allow players to become convoy leaders by accumulating points
   ConvoyLeadersNeededPoints: 6500 # How many points players need to become a convoy leader (if AssignConvoyLeadersByPoints is set to true)
 ```
@@ -141,8 +142,9 @@ Convoys allow all players on the server to follow 1 player (a convoy leader) and
 
 Note:
 
-- Convoys can only conclude with a point bonus if there are 2 or more players. For admins it can be 1 player.
-- Convoy leaders should allow all other players in the convoy to finish the lap before them. The convoy leader should finish last.
+- To start a convoy, convoy leaders ideally pull up next to the ambulance near the pit exit. Once parked they run /cs. When the convoy leader starts driving, a message will be shown in the chat to let others know that the convoy is on the move.
+- Convoy leaders should allow all other players in the convoy to finish the lap before them. The convoy leader should finish last, ideally staying right on the final straight and parking on the white concrete.
+- Convoys can only conclude with a point bonus if there are 2 or more other players. For admins it can be 1 player.
 
 ### Variable Idle Kick
 
@@ -158,10 +160,12 @@ Automated messages sent by the server at a specified interval.
 - `/chelp`: Quick guide on convoys and list of convoy related commands
 - `/cs`: Start a convoy
 - `/ce`: End a convoy
-- `/ct`: Allows drivers to transfer leadership of their convoy to another driver, or leadership of a different convoy to another driver (for admins)
+- `/ct`: Allows players to transfer leadership of their convoy to another player, or leadership of a different convoy to another player **(for admins)**
 - `/convoys`: Shows a list of online convoy leaders and any ongoing convoys
-- `/convoy`: Shows info on a specific convoy, like when it started and its drivers
+- `/convoy`: Shows info on a specific convoy, like when it started and its players
 - `/cars`: Shows the list of cars, how many points each of them require, and whether the player has unlocked them
+- `/next2unlock`: Shows a list of cars the player is about to unlock
+- `/unlocked`: Shows a list of cars the player has already unlocked and can drive
 - `/bonuses`: Shows the list of available bonus points players can earn
 - `/status`: Indicates the player's lap status (clean or not), their clean laps streak, points, cuts and collisions
 - `/points`: Shows the player their points
@@ -171,9 +175,9 @@ Automated messages sent by the server at a specified interval.
 - `/allbest`: Show the best lap time records for every car
 - `/cl`: Shows the player’s clean laps streak
 - `/tl`: Shows the player’s total laps
-- `/afp`: Give points to self or others (for admins)
-- `/tfp`: Remove points from self or others (for admins)
-- `/ca`: Add a temporary admin which is reset on server restart (for admins)
-- `/ra`: Temporarily remove an admin which is reset on server restart (for admins)
-- `/ccl`: Add a temporary convoy leader which is reset on server restart (for admins)
-- `/rcl`: Temporarily remove a convoy leader which is reset on server restart (for admins)
+- `/afp`: Give points to self or others **(for admins)**
+- `/tfp`: Remove points from self or others **(for admins)**
+- `/ca`: Add a temporary admin which is reset on server restart **(for admins)**
+- `/ra`: Temporarily remove an admin which is reset on server restart **(for admins)**
+- `/ccl`: Add a temporary convoy leader which is reset on server restart **(for admins)**
+- `/rcl`: Temporarily remove a convoy leader which is reset on server restart **(for admins)**

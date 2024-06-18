@@ -51,10 +51,6 @@ local onLapStart = ac.OnlineEvent({
     ac.StructItem.key("lightspeedPointsLapStart"),
     id = ac.StructItem.int32()
 })
-local onConvoyLeave = ac.OnlineEvent({
-    ac.StructItem.key("lightspeedPointsLeavingConvoy"),
-    id = ac.StructItem.int32()
-})
 local onConvoyAlmostFinish = ac.OnlineEvent({
     ac.StructItem.key("lightspeedPointsConvoyAlmostFinish"),
     id = ac.StructItem.int32()
@@ -117,9 +113,7 @@ end
 local pitExitCheckpoint = Checkpoint(vec3(585.79, 91.35, 1475.79), vec3(0, 0, 1), 12)
 local pitReEntryCheckpoint = Checkpoint(vec3(585.79, 91.35, 1475.79), vec3(0, 0, -1), 12)
 local lapStartCheckpoint = Checkpoint(vec3(170.46, 105.64, 1737.48), vec3(0, 0, 1), 20)
-local convoyLeavingCheckpoint = Checkpoint(vec3(545.16, 93.93, 1503.26), vec3(0, 0, 1), 12)
 local convoyNearFinishCheckpoint = Checkpoint(vec3(1986.75, 74.97, 374.93), vec3(1, 0, 0), 20)
-
 local convoyNorthTurnCheckpoint = Checkpoint(vec3(-625.59, 146.59, 2240.01), vec3(-1, 0, 0), 25)      -- 2km - North Turn
 local convoyAirfieldCheckpoint = Checkpoint(vec3(-2177.44, 93.59, 1540.91), vec3(0, 0, -1), 20)       -- 4km - Airfield
 local convoyFoxholeCheckpoint = Checkpoint(vec3(-2526.74, 37.83, -16.62), vec3(0, 0, -1), 20)         -- 6km - Foxhole
@@ -157,7 +151,6 @@ function DoUpdate(dt)
         { checkpoint = pitExitCheckpoint,              event = onPitLeave },
         { checkpoint = pitReEntryCheckpoint,           event = onPitReEntry },
         { checkpoint = lapStartCheckpoint,             event = onLapStart },
-        { checkpoint = convoyLeavingCheckpoint,        event = onConvoyLeave },
         { checkpoint = convoyNearFinishCheckpoint,     event = onConvoyAlmostFinish },
         { checkpoint = convoyNorthTurnCheckpoint,      event = onConvoyAtNorthTurn },
         { checkpoint = convoyAirfieldCheckpoint,       event = onConvoyAtAirfield },

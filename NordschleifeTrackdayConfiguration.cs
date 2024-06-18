@@ -68,5 +68,6 @@ public class ExtraConfiguration
     public bool DoublePointWeekend { get; init; } = true;
     public bool ImmediateKickCarNotUnlocked { get; init; } = false;
     public bool AssignConvoyLeadersByPoints { get; init; } = true;
+    public int Next2UnlockMaxEntries { get; init; } = 6;
     public int ConvoyLeadersNeededPoints { get; init; } = 6500;
 }

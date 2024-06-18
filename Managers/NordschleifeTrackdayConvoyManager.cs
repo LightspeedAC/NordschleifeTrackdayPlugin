@@ -25,9 +25,12 @@ public class NordschleifeTrackdayConvoyManager
         _convoys.Remove(driver);
     }
 
-    public void AddConvoy(NordschleifeTrackdaySession driver, List<ulong> finishingDrivers, List<ulong> startingDrivers)
+    public NordschleifeTrackdayConvoy AddConvoy(NordschleifeTrackdaySession driver, List<ulong> finishingDrivers, List<ulong> startingDrivers)
     {
-        _convoys.Add(driver.Client().Guid, new NordschleifeTrackdayConvoy(driver, finishingDrivers, startingDrivers));
+        var convoy = new NordschleifeTrackdayConvoy(driver, finishingDrivers, startingDrivers);
+        _convoys.Add(driver.Client().Guid, convoy);
+
+        return convoy;
     }
 
     public async void CheckConvoy(NordschleifeTrackdayConvoy convoy, NordschleifeTrackdaySession session)
@@ -84,8 +87,8 @@ public class NordschleifeTrackdayConvoyManager
             return false;
         }
 
-        AddConvoy(session, [], []);
-        session.SetHostingConvoy(true);
+        var convoy = AddConvoy(session, [], []);
+        session.SetHostingConvoy(convoy);
 
         _plugin._entryCarManager.BroadcastPacket(new ChatMessage
         {
@@ -174,7 +177,7 @@ public class NordschleifeTrackdayConvoyManager
         }
 
         RemoveConvoy(guid);
-        session.SetHostingConvoy(false);
+        session.SetHostingConvoy(null);
         return true;
     }
 
@@ -192,6 +195,7 @@ public class NordschleifeTrackdayConvoyManager
             _onlineConvoyLeaders.Add(name);
         }
 
+        session.Client().EntryCar.PositionUpdateReceived += _plugin.OnCarPositionUpdateReceived;
         return true;
     }
 
@@ -210,6 +214,7 @@ public class NordschleifeTrackdayConvoyManager
         }
 
         _onlineConvoyLeaders.Remove(name);
+        session.Client().EntryCar.PositionUpdateReceived -= _plugin.OnCarPositionUpdateReceived;
         return true;
     }
 

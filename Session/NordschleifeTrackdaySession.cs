@@ -2,6 +2,7 @@ using System.Data.SQLite;
 using System.Globalization;
 using AssettoServer.Network.Tcp;
 using AssettoServer.Shared.Network.Packets.Shared;
+using NordschleifeTrackdayPlugin.Convoy;
 using Serilog;
 
 namespace NordschleifeTrackdayPlugin.Session;
@@ -28,7 +29,7 @@ public sealed class NordschleifeTrackdaySession
     private int _cuts = 0;
     private int _collisions = 0;
 
-    private bool _hostingConvoy = false;
+    private NordschleifeTrackdayConvoy? _hostingConvoy = null;
     private long _lastAfkNotification = 0;
 
     public NordschleifeTrackdaySession(ACTcpClient client, NordschleifeTrackdayPlugin plugin)
@@ -343,12 +344,17 @@ public sealed class NordschleifeTrackdaySession
 
     public bool HostingConvoy()
     {
+        return _hostingConvoy != null;
+    }
+
+    public NordschleifeTrackdayConvoy? Convoy()
+    {
         return _hostingConvoy;
     }
 
-    public void SetHostingConvoy(bool b)
+    public void SetHostingConvoy(NordschleifeTrackdayConvoy? convoy)
     {
-        _hostingConvoy = b;
+        _hostingConvoy = convoy;
     }
 
     public long LastNotificationTime()

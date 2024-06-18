@@ -107,9 +107,8 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         cspClientMessageTypeManager.RegisterClientMessageType(0x236CD37F, new Action<ACTcpClient, PacketReader>(IncomingLapCut));
         cspClientMessageTypeManager.RegisterClientMessageType(0x4DA987D2, new Action<ACTcpClient, PacketReader>(IncomingPitLeave));
         cspClientMessageTypeManager.RegisterClientMessageType(0x2BD9A705, new Action<ACTcpClient, PacketReader>(IncomingPitReEntry));
-        cspClientMessageTypeManager.RegisterClientMessageType(0x34213D1E, new Action<ACTcpClient, PacketReader>(IncomingPitConvoyLeave));
-        cspClientMessageTypeManager.RegisterClientMessageType(0xE5E9C8E, new Action<ACTcpClient, PacketReader>(IncomingConvoyNearFinish));
         cspClientMessageTypeManager.RegisterClientMessageType(0xA5968DCA, new Action<ACTcpClient, PacketReader>(IncomingPitTeleport));
+        cspClientMessageTypeManager.RegisterClientMessageType(0xE5E9C8E, new Action<ACTcpClient, PacketReader>(IncomingConvoyNearFinish));
         cspClientMessageTypeManager.RegisterClientMessageType(0x1B27688C, new Action<ACTcpClient, PacketReader>(IncomingConvoyAtNorthTurn));
         cspClientMessageTypeManager.RegisterClientMessageType(0x8C75B5C8, new Action<ACTcpClient, PacketReader>(IncomingConvoyAtAirfield));
         cspClientMessageTypeManager.RegisterClientMessageType(0xEC91598C, new Action<ACTcpClient, PacketReader>(IncomingConvoyAtFoxhole));
@@ -425,19 +424,16 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         session.SetDoingLap(true);
         session.SetLapStart(serverTimeMs);
         session.ResetAverageSpeed();
-        foreach (var (key, convoy) in _convoyManager.Convoys())
+        var convoy = session.Convoy();
+        if (convoy != null)
         {
-            if (key == client.Guid)
+            convoy.SetStartedTimeMs(serverTimeMs);
+            _entryCarManager.BroadcastPacket(new ChatMessage
             {
-                convoy.SetStartedTimeMs(serverTimeMs);
-                _entryCarManager.BroadcastPacket(new ChatMessage
-                {
-                    SessionId = 255,
-                    Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy has crossed the starting line! You still have 20 seconds to catch up if you'd like to earn a convoy bonus."
-                });
-                Task.Delay(20 * 1000).ContinueWith((_) => _convoyManager.CheckConvoy(_convoyManager.Convoys()[key], session));
-                break;
-            }
+                SessionId = 255,
+                Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy has crossed the starting line! You still have 20 seconds to catch up if you'd like to earn a convoy bonus."
+            });
+            Task.Delay(20 * 1000).ContinueWith((_) => _convoyManager.CheckConvoy(convoy, session));
         }
 
         AddRecentLapStart(client.Guid, serverTimeMs);
@@ -514,24 +510,6 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         Log.Information($"{PLUGIN_PREFIX}{session.Username()} re-entered pits and was deducted points!");
     }
 
-    private async void IncomingPitConvoyLeave(ACTcpClient client, PacketReader reader)
-    {
-        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
-        if (session == null || !client.HasSentFirstUpdate)
-        {
-            return;
-        }
-
-        foreach (var (key, convoy) in _convoyManager.Convoys())
-        {
-            if (key == client.Guid)
-            {
-                await BroadcastWithDelayAsync($"{CONVOY_PREFIX}@{session.Username()}'s convoy is on the move!");
-                break;
-            }
-        }
-    }
-
     private void IncomingConvoyNearFinish(ACTcpClient client, PacketReader reader)
     {
         NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
@@ -540,22 +518,19 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             return;
         }
 
-        foreach (var (key, convoy) in _convoyManager.Convoys())
+        var convoy = session.Convoy();
+        if (convoy != null)
         {
-            if (key == client.Guid)
+            _entryCarManager.BroadcastPacket(new ChatMessage
             {
-                _entryCarManager.BroadcastPacket(new ChatMessage
-                {
-                    SessionId = 255,
-                    Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is approaching the finish line! Make sure to pass them and cross the finish line to claim your convoy bonus."
-                });
-                client.SendPacket(new ChatMessage
-                {
-                    SessionId = 255,
-                    Message = $"{TIP_PREFIX}Hey convoy leader! Turn on your hazards, slowly let off the gas and pull off to the right where the concrete is!"
-                });
-                break;
-            }
+                SessionId = 255,
+                Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is approaching the finish line! Make sure to pass them and cross the finish line to claim your convoy bonus."
+            });
+            client.SendPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = $"{TIP_PREFIX}Hey convoy leader! Turn on your hazards, slowly let off the gas and pull off to the right where the concrete is!"
+            });
         }
     }
 
@@ -588,20 +563,14 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             return;
         }
 
-        if (session.HostingConvoy())
+        var convoy = session.Convoy();
+        if (convoy != null)
         {
-            foreach (var (key, convoy) in _convoyManager.Convoys())
+            _entryCarManager.BroadcastPacket(new ChatMessage
             {
-                if (key == client.Guid)
-                {
-                    _entryCarManager.BroadcastPacket(new ChatMessage
-                    {
-                        SessionId = 255,
-                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 2 (Nordkehre) going {session.Speed()}km/h."
-                    });
-                    break;
-                }
-            }
+                SessionId = 255,
+                Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 2 (Nordkehre) going {session.Speed()}km/h."
+            });
         }
     }
 
@@ -613,20 +582,14 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             return;
         }
 
-        if (session.HostingConvoy())
+        var convoy = session.Convoy();
+        if (convoy != null)
         {
-            foreach (var (key, convoy) in _convoyManager.Convoys())
+            _entryCarManager.BroadcastPacket(new ChatMessage
             {
-                if (key == client.Guid)
-                {
-                    _entryCarManager.BroadcastPacket(new ChatMessage
-                    {
-                        SessionId = 255,
-                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 4 (Flugplatz) going {session.Speed()}km/h."
-                    });
-                    break;
-                }
-            }
+                SessionId = 255,
+                Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 4 (Flugplatz) going {session.Speed()}km/h."
+            });
         }
     }
 
@@ -638,20 +601,14 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             return;
         }
 
-        if (session.HostingConvoy())
+        var convoy = session.Convoy();
+        if (convoy != null)
         {
-            foreach (var (key, convoy) in _convoyManager.Convoys())
+            _entryCarManager.BroadcastPacket(new ChatMessage
             {
-                if (key == client.Guid)
-                {
-                    _entryCarManager.BroadcastPacket(new ChatMessage
-                    {
-                        SessionId = 255,
-                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 6 (Fuchsröhre) going {session.Speed()}km/h."
-                    });
-                    break;
-                }
-            }
+                SessionId = 255,
+                Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 6 (Fuchsröhre) going {session.Speed()}km/h."
+            });
         }
     }
 
@@ -663,20 +620,14 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             return;
         }
 
-        if (session.HostingConvoy())
+        var convoy = session.Convoy();
+        if (convoy != null)
         {
-            foreach (var (key, convoy) in _convoyManager.Convoys())
+            _entryCarManager.BroadcastPacket(new ChatMessage
             {
-                if (key == client.Guid)
-                {
-                    _entryCarManager.BroadcastPacket(new ChatMessage
-                    {
-                        SessionId = 255,
-                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 8 (Kallenhard) going {session.Speed()}km/h."
-                    });
-                    break;
-                }
-            }
+                SessionId = 255,
+                Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 8 (Kallenhard) going {session.Speed()}km/h."
+            });
         }
     }
 
@@ -688,20 +639,14 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             return;
         }
 
-        if (session.HostingConvoy())
+        var convoy = session.Convoy();
+        if (convoy != null)
         {
-            foreach (var (key, convoy) in _convoyManager.Convoys())
+            _entryCarManager.BroadcastPacket(new ChatMessage
             {
-                if (key == client.Guid)
-                {
-                    _entryCarManager.BroadcastPacket(new ChatMessage
-                    {
-                        SessionId = 255,
-                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 10 (Ex-Mühle) going {session.Speed()}km/h."
-                    });
-                    break;
-                }
-            }
+                SessionId = 255,
+                Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 10 (Ex-Mühle) going {session.Speed()}km/h."
+            });
         }
     }
 
@@ -713,20 +658,14 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             return;
         }
 
-        if (session.HostingConvoy())
+        var convoy = session.Convoy();
+        if (convoy != null)
         {
-            foreach (var (key, convoy) in _convoyManager.Convoys())
+            _entryCarManager.BroadcastPacket(new ChatMessage
             {
-                if (key == client.Guid)
-                {
-                    _entryCarManager.BroadcastPacket(new ChatMessage
-                    {
-                        SessionId = 255,
-                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 12 (Kesselchen) going {session.Speed()}km/h."
-                    });
-                    break;
-                }
-            }
+                SessionId = 255,
+                Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at KM 12 (Kesselchen) going {session.Speed()}km/h."
+            });
         }
     }
 
@@ -738,20 +677,14 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             return;
         }
 
-        if (session.HostingConvoy())
+        var convoy = session.Convoy();
+        if (convoy != null)
         {
-            foreach (var (key, convoy) in _convoyManager.Convoys())
+            _entryCarManager.BroadcastPacket(new ChatMessage
             {
-                if (key == client.Guid)
-                {
-                    _entryCarManager.BroadcastPacket(new ChatMessage
-                    {
-                        SessionId = 255,
-                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at the first carousel (Karussell) going {session.Speed()}km/h."
-                    });
-                    break;
-                }
-            }
+                SessionId = 255,
+                Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at the first carousel (Karussell) going {session.Speed()}km/h."
+            });
         }
     }
 
@@ -763,20 +696,14 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             return;
         }
 
-        if (session.HostingConvoy())
+        var convoy = session.Convoy();
+        if (convoy != null)
         {
-            foreach (var (key, convoy) in _convoyManager.Convoys())
+            _entryCarManager.BroadcastPacket(new ChatMessage
             {
-                if (key == client.Guid)
-                {
-                    _entryCarManager.BroadcastPacket(new ChatMessage
-                    {
-                        SessionId = 255,
-                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at YouTube Corner (Brünnchen) going {session.Speed()}km/h."
-                    });
-                    break;
-                }
-            }
+                SessionId = 255,
+                Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at YouTube Corner (Brünnchen) going {session.Speed()}km/h."
+            });
         }
     }
 
@@ -788,20 +715,14 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             return;
         }
 
-        if (session.HostingConvoy())
+        var convoy = session.Convoy();
+        if (convoy != null)
         {
-            foreach (var (key, convoy) in _convoyManager.Convoys())
+            _entryCarManager.BroadcastPacket(new ChatMessage
             {
-                if (key == client.Guid)
-                {
-                    _entryCarManager.BroadcastPacket(new ChatMessage
-                    {
-                        SessionId = 255,
-                        Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at the second carousel (Kleines Karussell) going {session.Speed()}km/h."
-                    });
-                    break;
-                }
-            }
+                SessionId = 255,
+                Message = $"{CONVOY_PREFIX}@{session.Username()}'s convoy is at the second carousel (Kleines Karussell) going {session.Speed()}km/h."
+            });
         }
     }
 
@@ -864,6 +785,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
 
             convoy.RemoveFinishingDriver(client.Guid);
         }
+
 
         if (_convoyManager.RemoveOnlineConvoyLeader(session))
         {
@@ -940,6 +862,26 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
                 });
                 Task.Delay(5 * 1000).ContinueWith((_) => client.SendPacket(new NordschleifeTrackdayCarLockedPacket { IsLocked = 1 }));//sending immediately doesnt work
             }
+        }
+    }
+
+    public void OnCarPositionUpdateReceived(EntryCar sender, in PositionUpdateIn args)
+    {
+        ACTcpClient? client = sender.Client;
+        if (client == null)
+        {
+            return;
+        }
+
+        NordschleifeTrackdaySession? session = _sessionManager.GetSession(client.Guid);
+        if (session == null || session.DoingLap())
+        {
+            return;
+        }
+
+        if (session.HostingConvoy() && (args.Velocity.Length() * 3.6f) > 1)
+        {
+            session.Convoy()?.SetIsOnMove(true);
         }
     }
 
@@ -1091,8 +1033,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             return false;
         }
 
-        DayOfWeek day = DateTime.Today.DayOfWeek;
-        return day == DayOfWeek.Saturday;
+        return DateTime.Today.DayOfWeek == DayOfWeek.Saturday;
     }
 
     public static async Task SendDiscordWebhook(string message)
