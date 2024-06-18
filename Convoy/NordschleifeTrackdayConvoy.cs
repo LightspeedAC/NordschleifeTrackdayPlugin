@@ -10,6 +10,8 @@ public sealed class NordschleifeTrackdayConvoy
     private List<ulong> _finishingDrivers = [];
     private List<ulong> _startingDrivers = [];
 
+    private bool _isOnMove = false;
+
     public NordschleifeTrackdayConvoy(NordschleifeTrackdaySession leader, List<ulong> finishingDrivers, List<ulong> startingDrivers)
     {
         _leader = leader;
@@ -75,5 +77,22 @@ public sealed class NordschleifeTrackdayConvoy
     public List<ulong> StartingDrivers()
     {
         return _startingDrivers;
+    }
+
+    public bool IsOnMove()
+    {
+        return _isOnMove;
+    }
+
+    public async void SetIsOnMove(bool b)
+    {
+        var inst = NordschleifeTrackdayPlugin.Instance();
+        if (IsOnMove() || inst == null)
+        {
+            return;
+        }
+
+        _isOnMove = b;
+        await inst.BroadcastWithDelayAsync($"{NordschleifeTrackdayPlugin.CONVOY_PREFIX}@{_leader.Username()}'s convoy is on the move!");
     }
 }
