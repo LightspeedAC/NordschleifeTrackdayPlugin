@@ -175,6 +175,7 @@ Automated messages sent by the server at a specified interval.
 - `/allbest`: Show the best lap time records for every car
 - `/cl`: Shows the player’s clean laps streak
 - `/tl`: Shows the player’s total laps
+- `/ttl`: Shows a list of players with the most clean laps completed
 - `/afp`: Give points to self or others **(for admins)**
 - `/tfp`: Remove points from self or others **(for admins)**
 - `/ca`: Add a temporary admin which is reset on server restart **(for admins)**

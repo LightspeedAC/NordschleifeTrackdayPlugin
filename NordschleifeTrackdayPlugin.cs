@@ -1,7 +1,6 @@
 using AssettoServer.Server;
 using AssettoServer.Network.Tcp;
 using Serilog;
-using System.Text.RegularExpressions;
 using NordschleifeTrackdayPlugin.Managers;
 using NordschleifeTrackdayPlugin.Session;
 using AssettoServer.Shared.Network.Packets.Shared;
@@ -12,7 +11,6 @@ using Microsoft.Extensions.Hosting;
 using AssettoServer.Shared.Network.Packets;
 using System.Reflection;
 using NordschleifeTrackdayPlugin.Packets;
-using AssettoServer.Server.Weather;
 using System.Text.Json;
 using System.Text;
 using AssettoServer.Server.GeoParams;
@@ -38,20 +36,18 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     public SQLiteConnection _database = new();
 
     private static NordschleifeTrackdayPlugin? _instance;
+    public readonly ACServerConfiguration _acServerConfiguration;
     public readonly EntryCarManager _entryCarManager;
     public readonly SessionManager _asSessionManager;
-    public readonly WeatherManager _weatherManager;
     public readonly NordschleifeTrackdaySessionManager _sessionManager;
     public readonly NordschleifeTrackdayConvoyManager _convoyManager;
     public readonly NordschleifeTrackdayConfiguration _config;
-
-    private static readonly string[] _forbiddenUsernameSubstrings = ["discord", "@", "#", ":", "```"];
-    private static readonly string[] _forbiddenUsernames = ["everyone", "here"];
 
     private bool _warnedSessionEnd = false;
     private readonly Queue<(ulong, long)> _recentLapStarts = [];//used to determine if a starting convoy is empty and should be ended 
     private readonly Dictionary<string, (string, uint)> _bestLapTimes = [];
     private Dictionary<ulong, (string, int)> _pointsLeaderboard = [];
+    private Dictionary<ulong, (string, int)> _totalLapsLeaderboard = [];
     private int _currentAnnouncementIndex = 0;
 
     private static string _databasePath = "";
@@ -74,7 +70,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
     public static int _pointsRewardBeatTb = 75;
     public static int _pointsRewardConvoy = 150;
 
-    public NordschleifeTrackdayPlugin(NordschleifeTrackdayConfiguration nordschleifeTrackdayConfiguration, GeoParamsManager geoParamsManager, ACServerConfiguration acServerConfiguration, EntryCarManager entryCarManager, SessionManager sessionManager, WeatherManager weatherManager, CSPServerScriptProvider cspServerScriptProvider, CSPClientMessageTypeManager cspClientMessageTypeManager, CSPFeatureManager cspFeatureManager, IHostApplicationLifetime applicationLifetime) : base(applicationLifetime)
+    public NordschleifeTrackdayPlugin(NordschleifeTrackdayConfiguration nordschleifeTrackdayConfiguration, GeoParamsManager geoParamsManager, ACServerConfiguration acServerConfiguration, EntryCarManager entryCarManager, SessionManager sessionManager, CSPServerScriptProvider cspServerScriptProvider, CSPClientMessageTypeManager cspClientMessageTypeManager, IHostApplicationLifetime applicationLifetime) : base(applicationLifetime)
     {
         Log.Information("--------------------------------------");
         Log.Information($"{PLUGIN_NAME} - Jonfinity");
@@ -83,11 +79,12 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         _config = nordschleifeTrackdayConfiguration;
         LoadFromConfig(geoParamsManager, acServerConfiguration);
         StartDatabase();
+        _ = DoLeaderboardUpdate();
         _instance = this;
 
+        _acServerConfiguration = acServerConfiguration;
         _entryCarManager = entryCarManager;
         _asSessionManager = sessionManager;
-        _weatherManager = weatherManager;
         _sessionManager = new NordschleifeTrackdaySessionManager(this);
         _convoyManager = new NordschleifeTrackdayConvoyManager(this);
         applicationLifetime.ApplicationStopping.Register(ApplicationStopping);
@@ -122,13 +119,10 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         using var stream = new StreamReader(Assembly.GetExecutingAssembly().GetManifestResourceStream("NordschleifeTrackdayPlugin.Lua.NordschleifeTrackdayScript.lua")!);
         cspServerScriptProvider.AddScript(stream.ReadToEnd(), "NordschleifeTrackdayScript.lua");
 
-        System.Timers.Timer timer = new(_config.Announcements.Interval * 1000);
-        timer.Elapsed += new System.Timers.ElapsedEventHandler(DoAnnouncements);
-        timer.Start();
-
-        System.Timers.Timer leaderboardTimer = new(1800 * 1000);
-        timer.Elapsed += new System.Timers.ElapsedEventHandler(UpdateLeaderboard);
-        timer.Start();
+        if (_config.Announcements.Enabled)
+        {
+            Task.Delay(120 * 1000).ContinueWith((_) => DoAnnouncementsUpdate());
+        }
     }
 
     private void ApplicationStopping()
@@ -242,40 +236,6 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             }
             _bestLapTimes.Add(car.Item1, (username, lapTime));
         }
-
-        _pointsLeaderboard = GetPointsLeaderboard();
-    }
-
-    private void DoAnnouncements(object? sender, EventArgs args)
-    {
-        if (_asSessionManager.ServerTimeMilliseconds < 60000)
-        {
-            return;
-        }
-
-        long currentSessionTime = _asSessionManager.CurrentSession.SessionTimeMilliseconds;
-        if (!_warnedSessionEnd && (currentSessionTime + 360000) >= _asSessionManager.CurrentSession.TimeLeftMilliseconds)
-        {
-            _entryCarManager.BroadcastPacket(new ChatMessage
-            {
-                SessionId = 255,
-                Message = $"{ANNOUNCEMENT_PREFIX}The server session ends in 6 minutes, you'll be teleported to pits shortly."
-            });
-            Log.Information($"{PLUGIN_PREFIX}Just warned of nearing server session end in 6 mins!");
-            _warnedSessionEnd = true;
-        }
-
-        _entryCarManager.BroadcastPacket(new ChatMessage
-        {
-            SessionId = 255,
-            Message = $"{ANNOUNCEMENT_PREFIX}{_announcements[_currentAnnouncementIndex]}"
-        });
-        _currentAnnouncementIndex = (_currentAnnouncementIndex + 1) % _announcements.Count;
-    }
-
-    private void UpdateLeaderboard(object? sender, EventArgs args)
-    {
-        _pointsLeaderboard = GetPointsLeaderboard();
     }
 
     public static List<ulong> Admins()
@@ -1003,27 +963,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         Log.Information($"{PLUGIN_PREFIX}{session.Username()} completed a clean lap!");
         session.AddPoints(_pointsRewardPerLap);
         session.AddCleanLap();
-        CreateLaptime(client, lapTimeMs, session.AverageSpeed());
-    }
-
-    public static string SanitizeUsername(string name)
-    {
-        foreach (string str in _forbiddenUsernames)
-        {
-            if (name == str)
-            {
-                return $"_{str}";
-            }
-        }
-
-        foreach (string str in _forbiddenUsernameSubstrings)
-        {
-            name = Regex.Replace(name, str, new string('*', str.Length), RegexOptions.IgnoreCase);
-        }
-
-        name = name[..Math.Min(name.Length, 80)];
-
-        return name;
+        NordschleifeTrackdayUtils.CreateLaptime(_database, client, lapTimeMs, session.AverageSpeed());
     }
 
     public static bool IsDoublePoints()
@@ -1081,38 +1021,50 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
         }
     }
 
-    public Dictionary<ulong, (string, int)> Leaderboard()
+    public Dictionary<ulong, (string, int)> PointsLeaderboard()
     {
         return _pointsLeaderboard;
     }
 
-    private Dictionary<ulong, (string, int)> GetPointsLeaderboard()
+    public Dictionary<ulong, (string, int)> TotalLapsLeaderboard()
     {
-        Dictionary<ulong, (string, int)> leaderboard = [];
-        using (var command = new SQLiteCommand($"SELECT id, name, points FROM users ORDER BY points DESC LIMIT 0,{LEADERBOARD_MAX_ENTRIES}", _database))
-        {
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
-            {
-                ulong id = Convert.ToUInt64(reader["id"]);
-                string name = reader["name"].ToString() ?? NO_NAME;
-                int points = Convert.ToInt32(reader["points"]);
-                leaderboard.Add(id, (name, points));
-            }
-        }
-
-        return leaderboard;
+        return _totalLapsLeaderboard;
     }
 
-    public void CreateLaptime(ACTcpClient client, uint time, int speed)
+    private async Task DoAnnouncementsUpdate()
     {
-        using var command = new SQLiteCommand("INSERT INTO laptimes (user_id, car, time, average_speedkmh, completed_on) VALUES (@user_id, @car, @time, @average_speedkmh, @completed_on)", _database);
-        command.Parameters.AddWithValue("@user_id", client.Guid);
-        command.Parameters.AddWithValue("@car", client.EntryCar.Model);
-        command.Parameters.AddWithValue("@time", time);
-        command.Parameters.AddWithValue("@average_speedkmh", speed);
-        command.Parameters.AddWithValue("@completed_on", DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"));
-        command.ExecuteNonQuery();
+        while (true)
+        {
+            long currentSessionTime = _asSessionManager.CurrentSession.SessionTimeMilliseconds;
+            if (!_warnedSessionEnd && (currentSessionTime + 360000) >= _asSessionManager.CurrentSession.TimeLeftMilliseconds)
+            {
+                _entryCarManager.BroadcastPacket(new ChatMessage
+                {
+                    SessionId = 255,
+                    Message = $"{ANNOUNCEMENT_PREFIX}The server session ends in 6 minutes, you'll be teleported to pits shortly."
+                });
+                Log.Information($"{PLUGIN_PREFIX}Just warned of nearing server session end in 6 mins!");
+                _warnedSessionEnd = true;
+            }
+
+            _entryCarManager.BroadcastPacket(new ChatMessage
+            {
+                SessionId = 255,
+                Message = $"{ANNOUNCEMENT_PREFIX}{_announcements[_currentAnnouncementIndex]}"
+            });
+            _currentAnnouncementIndex = (_currentAnnouncementIndex + 1) % _announcements.Count;
+            await Task.Delay(_config.Announcements.Interval * 1000);
+        }
+    }
+
+    private async Task DoLeaderboardUpdate()
+    {
+        while (true)
+        {
+            _pointsLeaderboard = NordschleifeTrackdayUtils.GetLeaderboard(0, _database, LEADERBOARD_MAX_ENTRIES);
+            _totalLapsLeaderboard = NordschleifeTrackdayUtils.GetLeaderboard(1, _database, LEADERBOARD_MAX_ENTRIES);
+            await Task.Delay(1800 * 1000);
+        }
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)

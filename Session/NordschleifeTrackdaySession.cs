@@ -36,13 +36,13 @@ public sealed class NordschleifeTrackdaySession
     {
         _client = client;
         _plugin = plugin;
-        _username = NordschleifeTrackdayPlugin.SanitizeUsername(client.Name ?? NordschleifeTrackdayPlugin.NO_NAME);
+        _username = NordschleifeTrackdayUtils.SanitizeUsername(client.Name ?? NordschleifeTrackdayPlugin.NO_NAME);
     }
 
     public void OnCreation()
     {
         Log.Information($"{NordschleifeTrackdayPlugin.PLUGIN_PREFIX}Session created: {_username}");
-        var userData = GetUser(_client.Guid, _client.EntryCar.Model);
+        var userData = NordschleifeTrackdayUtils.GetUser(_plugin._database, NordschleifeTrackdayPlugin._pointsStarting, _client.Guid, _client.EntryCar.Model);
         _points = userData.Points;
         _cleanLaps = userData.CleanLapStreak;
         _mostRecentCleanLap = userData.LastCleanLap;
@@ -59,7 +59,7 @@ public sealed class NordschleifeTrackdaySession
         CheckCleanLapStreak();
 
         Log.Information($"{NordschleifeTrackdayPlugin.PLUGIN_PREFIX}Session removed: {_username}");
-        UpdateUser(_client.Guid, _username, _client?.NationCode ?? "???", _points, _cleanLaps, MostRecentCleanLapStr(), _cuts, _collisions);
+        NordschleifeTrackdayUtils.UpdateUser(_plugin._database, _client.Guid, _username, _client?.NationCode ?? "???", _points, _cleanLaps, MostRecentCleanLapStr(), _cuts, _collisions);
     }
 
     public ACTcpClient Client()
@@ -365,60 +365,5 @@ public sealed class NordschleifeTrackdaySession
     public void SetLastNotificationTime(long l)
     {
         _lastAfkNotification = l;
-    }
-
-    public (int Points, int CleanLapStreak, long LastCleanLap, int TotalLaps, uint PersonalBest, int Cuts, int Collisions) GetUser(ulong guid, string car)
-    {
-        int points = NordschleifeTrackdayPlugin._pointsStarting;
-        int cleanLapStreak = 0;
-        long lastCleanLap = 0;
-        int totalLaps = 0;
-        uint pb = 0;
-        int cuts = 0;
-        int collisions = 0;
-
-        using (var command = new SQLiteCommand("SELECT points, clean_lap_streak, last_clean_lap, cuts, collisions FROM users WHERE id = @id LIMIT 0,1", _plugin._database))
-        {
-            command.Parameters.AddWithValue("@id", guid);
-            using var reader = command.ExecuteReader();
-            if (reader.Read())
-            {
-                points = Convert.ToInt32(reader["points"]);
-                cleanLapStreak = Convert.ToInt32(reader["clean_lap_streak"]);
-                string lastCleanLapString = Convert.ToDateTime(reader["last_clean_lap"]).ToString("yyyy-MM-dd HH:mm:ss") ?? "1970-01-02 00:00:00";
-                DateTime lastCleanLapUtcDateTime = DateTime.ParseExact(lastCleanLapString, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
-                lastCleanLap = ((DateTimeOffset)lastCleanLapUtcDateTime).ToUnixTimeSeconds();
-                cuts = Convert.ToInt32(reader["cuts"]);
-                collisions = Convert.ToInt32(reader["collisions"]);
-            }
-        }
-
-        using (var command = new SQLiteCommand("SELECT COUNT(*) FROM laptimes WHERE user_id = @id", _plugin._database))
-        {
-            command.Parameters.AddWithValue("@id", guid);
-            totalLaps = Convert.ToInt32(command.ExecuteScalar());
-        }
-        using (var command = new SQLiteCommand("SELECT time FROM laptimes WHERE user_id = @id AND car = @car ORDER BY time ASC LIMIT 0,1", _plugin._database))
-        {
-            command.Parameters.AddWithValue("@id", guid);
-            command.Parameters.AddWithValue("@car", car);
-            pb = Convert.ToUInt32(command.ExecuteScalar());
-        }
-
-        return (points, cleanLapStreak, lastCleanLap, totalLaps, pb, cuts, collisions);
-    }
-
-    public void UpdateUser(ulong guid, string name, string country, int points, int clean_lap_streak, string last_clean_lap, int cuts, int collisions)
-    {
-        using var updateCommand = new SQLiteCommand("INSERT INTO users (id, name, country, points, clean_lap_streak, last_clean_lap, cuts, collisions) VALUES (@id, @name, @country, @points, @clean_lap_streak, @last_clean_lap, @cuts, @collisions) ON CONFLICT(id) DO UPDATE SET name = excluded.name, country = excluded.country, points = excluded.points, clean_lap_streak = excluded.clean_lap_streak, last_clean_lap = excluded.last_clean_lap, cuts = excluded.cuts, collisions = excluded.collisions;", _plugin._database);
-        updateCommand.Parameters.AddWithValue("@id", guid);
-        updateCommand.Parameters.AddWithValue("@name", name);
-        updateCommand.Parameters.AddWithValue("@country", country);
-        updateCommand.Parameters.AddWithValue("@points", points);
-        updateCommand.Parameters.AddWithValue("@clean_lap_streak", clean_lap_streak);
-        updateCommand.Parameters.AddWithValue("@last_clean_lap", last_clean_lap);
-        updateCommand.Parameters.AddWithValue("@cuts", cuts);
-        updateCommand.Parameters.AddWithValue("@collisions", collisions);
-        updateCommand.ExecuteNonQuery();
     }
 }
