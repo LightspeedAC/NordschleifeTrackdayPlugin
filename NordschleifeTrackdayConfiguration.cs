@@ -70,4 +70,5 @@ public class ExtraConfiguration
     public bool AssignConvoyLeadersByPoints { get; init; } = true;
     public int Next2UnlockMaxEntries { get; init; } = 6;
     public int ConvoyLeadersNeededPoints { get; init; } = 6500;
+    public bool CountCollisionsInPits { get; init; } = true;
 }

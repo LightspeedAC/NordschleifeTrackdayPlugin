@@ -805,6 +805,7 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
             Message = bestLapTimeToBeat < 1 ? $"There's no lap time set for the {carModel} yet! You can be the first to set it." : $"The best lap time with the {carModel} is {lapTimeStr} by @{bestLapTimeToBeatBy}{yourselfStr}!"
         });
 
+        bool lockedPacket = false;
         string? kickReason = session.PreparedKickReason();
         if (kickReason != null)
         {
@@ -820,9 +821,19 @@ public class NordschleifeTrackdayPlugin : CriticalBackgroundService
                     SessionId = 255,
                     Message = $"You'll be kicked in 30 seconds! You are {kickReason}."
                 });
-                Task.Delay(5 * 1000).ContinueWith((_) => client.SendPacket(new NordschleifeTrackdayCarLockedPacket { IsLocked = 1 }));//sending immediately doesnt work
+                lockedPacket = true;
             }
         }
+
+        Task.Delay(5 * 1000).ContinueWith((_) =>
+        {
+            if (lockedPacket)
+            {
+                client.SendPacket(new NordschleifeTrackdayCarLockedPacket { IsLocked = 1 });
+            }
+            client.SendPacket(new NordschleifeTrackdayPitCollisionsPacket { IsPitCollisionsCounted = (ushort)(_config.Extra.CountCollisionsInPits ? 1 : 0) });
+        });
+        //task because sending immediately doesnt work
     }
 
     public void OnCarPositionUpdateReceived(EntryCar sender, in PositionUpdateIn args)

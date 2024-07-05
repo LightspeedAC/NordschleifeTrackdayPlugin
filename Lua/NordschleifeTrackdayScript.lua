@@ -4,6 +4,7 @@ local cutTimeout = 0
 local minCollisionHeight = 0.27
 local toTeleportMaxSpeedThreshold = 500
 local isCarLockedForPlayer = false
+local countCollisionsInPits = true
 
 local pitsCornerA = { x = 549.23, z = 1502.58 }
 local pitsCornerB = { x = 696.02, z = 1346.43 }
@@ -21,9 +22,23 @@ local onCarLockedReceive = ac.OnlineEvent({
 }, function(sender, message)
     if sender ~= nil then return end
 
-    ac.debug("IsLocked", message.isLocked)
     if message.isLocked == 1 then
         isCarLockedForPlayer = true
+    else
+        isCarLockedForPlayer = false
+    end
+end)
+
+local onCarPitCollisionsReceive = ac.OnlineEvent({
+    ac.StructItem.key("lightspeedPointsPitCollisionsReceive"),
+    isPitCollisionsCounted = ac.StructItem.uint16(),
+}, function(sender, message)
+    if sender ~= nil then return end
+
+    if message.isPitCollisionsCounted == 1 then
+        countCollisionsInPits = true
+    else
+        countCollisionsInPits = false
     end
 end)
 
@@ -126,10 +141,8 @@ local convoySecondCarouselCheckpoint = Checkpoint(vec3(1721.88, 68.38, 178.33), 
 
 local lastCarPositions = {}
 
-function DoUpdate(dt)
+function DoUpdate(dt, currentPosition)
     local carIndex = 0
-    local car = ac.getCar(carIndex)
-    local currentPosition = car.position
 
     if isCarLockedForPlayer then
         physics.setCarNoInput(true)
@@ -172,10 +185,14 @@ function DoUpdate(dt)
 end
 
 function script.update(dt)
+    local car = ac.getCar(0)
+    local currentPosition = car.position
+
     if collisionTimeout > 0 then
         collisionTimeout = collisionTimeout - dt
-    elseif player.speedKmh > 0 and player.collisionPosition.y > minCollisionHeight then
-        if player.collidedWith >= 0 then
+    elseif player.speedKmh > 0 and player.collisionPosition.y > minCollisionHeight and player.collidedWith >= 0 then
+        local inPits = isWithinPits(currentPosition)
+        if not inPits or (inPits and countCollisionsInPits) then
             onCollision { Speed = player.speedKmh }
             collisionTimeout = 1
         end
@@ -188,5 +205,5 @@ function script.update(dt)
         cutTimeout = 1
     end
 
-    DoUpdate(dt)
+    DoUpdate(dt, currentPosition)
 end

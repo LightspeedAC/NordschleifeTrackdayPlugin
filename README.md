@@ -109,6 +109,7 @@ Extra:
   Next2UnlockMaxEntries: 6 # How many cars are shown to the player when they run /next2unlock
   AssignConvoyLeadersByPoints: true # Whether to allow players to become convoy leaders by accumulating points
   ConvoyLeadersNeededPoints: 6500 # How many points players need to become a convoy leader (if AssignConvoyLeadersByPoints is set to true)
+  CountCollisionsInPits: true # Whether to count collisions that occur within pits
 ```
 
 ## Features

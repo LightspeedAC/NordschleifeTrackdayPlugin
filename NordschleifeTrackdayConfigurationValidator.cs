@@ -65,6 +65,7 @@ public class NordschleifeTrackdayConfigurationValidator : AbstractValidator<Nord
             ch.RuleFor(cfg => cfg.Next2UnlockMaxEntries).GreaterThanOrEqualTo(1);
             ch.RuleFor(cfg => cfg.AssignConvoyLeadersByPoints).NotNull();
             ch.RuleFor(cfg => cfg.ConvoyLeadersNeededPoints).GreaterThanOrEqualTo(1);
+            ch.RuleFor(cfg => cfg.CountCollisionsInPits).NotNull();
         });
     }
 }
