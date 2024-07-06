@@ -420,6 +420,7 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         Reply("- /allbest: See the best lap time records for every car on the server");
         Reply("- /cl: See your clean laps streak");
         Reply("- /tl: See your total laps");
+        Reply("- /ttl: See a list of drivers with the most clean laps completed");
         if (NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid))
         {
             Reply("- /afp[args: int, driver(opt)]: Add points to self or others");
@@ -696,11 +697,10 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
     {
         Reply("Richest Drivers:");
         int i = 1;
-        foreach (var entry in _plugin.Leaderboard())
+        foreach (var entry in _plugin.PointsLeaderboard())
         {
             Reply($"{i}. @{entry.Value.Item1} - {entry.Value.Item2} points");
             i++;
-
             if (i > NordschleifeTrackdayPlugin.LEADERBOARD_MAX_ENTRIES)
             {
                 break;
@@ -832,5 +832,21 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         }
 
         Reply($"You have {session.TotalLaps()} total laps.");
+    }
+
+    [Command("ttl", "toptotallaps")]
+    public void TopTotalLaps()
+    {
+        Reply("Cleanest Drivers:");
+        int i = 1;
+        foreach (var entry in _plugin.TotalLapsLeaderboard())
+        {
+            Reply($"{i}. @{entry.Value.Item1} - {entry.Value.Item2} clean laps");
+            i++;
+            if (i > NordschleifeTrackdayPlugin.LEADERBOARD_MAX_ENTRIES)
+            {
+                break;
+            }
+        }
     }
 }
