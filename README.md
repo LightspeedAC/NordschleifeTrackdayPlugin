@@ -1,6 +1,6 @@
 # NordschleifeTrackdayPlugin
 
-An [AssettoServer](https://github.com/compujuckel/AssettoServer "‌") plugin designed for Nurburgring Nordschleife servers! It brings progression for unlocking faster cars, convoys, variable idle kicking, and more. [Live example](https://acstuff.ru/s/q:race/online/join?!ip=204.10.194.151&httpPort=8702)!
+An [AssettoServer](https://github.com/compujuckel/AssettoServer "‌") plugin designed for Nurburgring Nordschleife servers! It brings progression for unlocking faster cars, convoys, variable idle kicking, and more. [Live example](https://acstuff.ru/s/q:race/online/join?ip=204.10.194.151&httpPort=8702)!
 
 This plugin will only function properly if:
 - Used on the **Tourist** version of the Nordschleife track
@@ -119,22 +119,18 @@ Extra:
 ## Features
 
 ### Progression with Points
-
 Players earn points by completing a clean lap (without a cut or collision) and through bonuses. Each collision, pit re-entry, and invalid lap completion deducts points from the player. As players earn more points they unlock access to more cars, and as they reach a certain milestone in points they are assigned as convoy leaders (more on that below).
 
-Earning points:
-
+#### Earning points:
 - Completing a clean lap
 - Earning a point bonus (clean lap streak, convoys, etc.)
 
-Point deductions:
-
+#### Point deductions:
 - Each collision
 - Reversing back into pits
 - Completing an invalid lap
 
-Available point bonuses:
-
+#### Available point bonuses:
 - Completing a lap with a clean lap steak at 3 or higher
 - Participating in and finishing a clean lap with a convoy
 - Beating your personal best lap time
@@ -145,7 +141,7 @@ Available point bonuses:
 
 Convoys allow all players on the server to follow 1 player (a convoy leader) and complete a lap with them to earn a big point bonus. Convoys can only be hosted by admins and/or players with a specific amount of points or more.
 
-Note:
+#### Note:
 
 - To start a convoy, convoy leaders ideally pull up next to the ambulance near the pit exit. Once parked they run /cs. When the convoy leader starts driving, a message will be shown in the chat to let others know that the convoy is on the move.
 - Convoy leaders should allow all other players in the convoy to finish the lap before them. The convoy leader should finish last, ideally staying right on the final straight and parking on the white concrete.
@@ -160,12 +156,9 @@ Players by default can idle for 15 minutes, after completing 5 clean laps they c
 Automated messages sent by the server at a specified interval.
 
 ### Commands
-
+#### Default:
 - `/help`: Quick guide and list of commands
 - `/chelp`: Quick guide on convoys and list of convoy related commands
-- `/cs`: Start a convoy
-- `/ce`: End a convoy
-- `/ct`: Allows players to transfer leadership of their convoy to another player, or leadership of a different convoy to another player **(for admins)**
 - `/convoys`: Shows a list of online convoy leaders and any ongoing convoys
 - `/convoy`: Shows info on a specific convoy, like when it started and its players
 - `/cars`: Shows the list of cars, how many points each of them require, and whether the player has unlocked them
@@ -181,9 +174,18 @@ Automated messages sent by the server at a specified interval.
 - `/cl`: Shows the player’s clean laps streak
 - `/tl`: Shows the player’s total laps
 - `/ttl`: Shows a list of players with the most clean laps completed
-- `/afp`: Give points to self or others **(for admins)**
-- `/tfp`: Remove points from self or others **(for admins)**
-- `/ca`: Add a temporary admin which is reset on server restart **(for admins)**
-- `/ra`: Temporarily remove an admin which is reset on server restart **(for admins)**
-- `/ccl`: Add a temporary convoy leader which is reset on server restart **(for admins)**
-- `/rcl`: Temporarily remove a convoy leader which is reset on server restart **(for admins)**
+
+#### Convoy Leader:
+- `/cs`: Start a convoy
+- `/ce`: End your convoy **(or someone elses if you're an admin)**
+
+#### Admin:
+- `/ct`: Allows players to transfer leadership of their convoy to another player, or leadership of a different convoy to another player
+- `/afp`: Give points to yourself or others
+- `/tfp`: Remove points from yourself or others
+- `/rp`: Reset your points or someone elses
+- `/rcc`: Reset your cuts/collisions or someone elses
+- `/ca`: Add a temporary admin which is reset on server restart
+- `/ra`: Temporarily remove an admin which is reset on server restart
+- `/ccl`: Add a temporary convoy leader which is reset on server restart
+- `/rcl`: Temporarily remove a convoy leader which is reset on server restart

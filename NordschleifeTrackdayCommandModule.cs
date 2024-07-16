@@ -89,6 +89,81 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         });
     }
 
+    [Command("rp", "resetpoints")]
+    public void ResetPoints(ACTcpClient? driver = null)
+    {
+        if (Client == null)
+        {
+            return;
+        }
+
+        if (!NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid))
+        {
+            Reply("You have no access to this command!");
+            return;
+        }
+
+        bool providedOther = driver != null;
+        ulong otherGuid = driver?.Guid ?? 0;
+        if (providedOther && otherGuid == Client.Guid)
+        {
+            Reply("You can't use this command on yourself!");
+            return;
+        }
+
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(providedOther ? otherGuid : Client.Guid);
+        if (session == null)
+        {
+            return;
+        }
+
+        session.ResetPoints();
+        Reply(providedOther ? $"Reset @{driver?.Name}'s points." : $"Points reset.");
+        driver?.SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"Your points were reset by @{Client.Name}!"
+        });
+    }
+
+    [Command("rcc", "resetcc")]
+    public void ResetCutsCollisions(ACTcpClient? driver = null)
+    {
+        if (Client == null)
+        {
+            return;
+        }
+
+        if (!NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid))
+        {
+            Reply("You have no access to this command!");
+            return;
+        }
+
+        bool providedOther = driver != null;
+        ulong otherGuid = driver?.Guid ?? 0;
+        if (providedOther && otherGuid == Client.Guid)
+        {
+            Reply("You can't use this command on yourself!");
+            return;
+        }
+
+        NordschleifeTrackdaySession? session = _plugin._sessionManager.GetSession(providedOther ? otherGuid : Client.Guid);
+        if (session == null)
+        {
+            return;
+        }
+
+        session.ResetCuts();
+        session.ResetCollisions();
+        Reply(providedOther ? $"Reset @{driver?.Name}'s cuts and collisions." : $"Cuts and collisions reset.");
+        driver?.SendPacket(new ChatMessage
+        {
+            SessionId = 255,
+            Message = $"Your cuts and collisions were reset by @{Client.Name}!"
+        });
+    }
+
     [Command("ca", "createadmin")]
     public void CreateAdmin(ACTcpClient driver)
     {
@@ -423,8 +498,10 @@ public class NordschleifeTrackdayCommandModule : ACModuleBase
         Reply("- /ttl: See a list of drivers with the most clean laps completed");
         if (NordschleifeTrackdayPlugin.Admins().Contains(Client.Guid))
         {
-            Reply("- /afp[args: int, driver(opt)]: Add points to self or others");
-            Reply("- /tfp[args: int, driver(opt)]: Remove points from self or others");
+            Reply("- /afp[args: int, driver(opt)]: Add points to yourself or others");
+            Reply("- /tfp[args: int, driver(opt)]: Remove points from yourself or others");
+            Reply("- /rp[driver(opt)]: Reset your points or someone elses");
+            Reply("- /rcc[driver(opt)]: Reset your cuts/collisions or someone elses");
             Reply("- /ca[args: driver]: Add a temporary admin (doesn't save during server restart)");
             Reply("- /ra[args: driver]: Temporarily remove an admin (doesn't save during server restart)");
             Reply("- /ccl[args: driver]: Add a temporary convoy leader (doesn't save during server restart)");

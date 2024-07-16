@@ -1,5 +1,3 @@
-using System.Data.SQLite;
-using System.Globalization;
 using AssettoServer.Network.Tcp;
 using AssettoServer.Shared.Network.Packets.Shared;
 using NordschleifeTrackdayPlugin.Convoy;
@@ -120,6 +118,11 @@ public sealed class NordschleifeTrackdaySession
     public int Points()
     {
         return _points;
+    }
+
+    public void ResetPoints()
+    {
+        _points = 0;
     }
 
     public void TakePoints(int i)
@@ -264,6 +267,11 @@ public sealed class NordschleifeTrackdaySession
         _cuts++;
     }
 
+    public void ResetCuts()
+    {
+        _cuts = 0;
+    }
+
     public int Collisions()
     {
         return _collisions;
@@ -272,6 +280,11 @@ public sealed class NordschleifeTrackdaySession
     public void AddCollision()
     {
         _collisions++;
+    }
+
+    public void ResetCollisions()
+    {
+        _collisions = 0;
     }
 
     public int CleanLaps()
