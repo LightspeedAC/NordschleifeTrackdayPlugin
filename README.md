@@ -2,7 +2,9 @@
 
 An [AssettoServer](https://github.com/compujuckel/AssettoServer "‌") plugin designed for Nurburgring Nordschleife servers! It brings progression for unlocking faster cars, convoys, variable idle kicking, and more. [Live example](https://acstuff.ru/s/q:race/online/join?!ip=204.10.194.151&httpPort=8702)!
 
-This plugin will only function properly on the **Tourist** version of the Nordschleife track!
+This plugin will only function properly if:
+- Used on the **Tourist** version of the Nordschleife track
+- Server has a **minimum CSP version of 1937 (v0.1.77)**
 
 ## Configuration
 
