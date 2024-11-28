@@ -125,9 +125,9 @@ function Checkpoint:passed(previous, current)
     return current:closerToThan(self.position, self.radius) and previousSide ~= currentSide and previousSide == false
 end
 
-local pitExitCheckpoint = Checkpoint(vec3(585.79, 91.35, 1475.79), vec3(0, 0, 1), 12)
+local pitExitCheckpoint = Checkpoint(vec3(576.9, 92.8, 1476.6), vec3(0, 0, 1), 15)
 local pitReEntryCheckpoint = Checkpoint(vec3(585.79, 91.35, 1475.79), vec3(0, 0, -1), 12)
-local lapStartCheckpoint = Checkpoint(vec3(170.46, 105.64, 1737.48), vec3(0, 0, 1), 20)
+local lapStartCheckpoint = Checkpoint(vec3(170.46, 105.64, 1737.48), vec3(0, 0, 1), 25)
 local convoyNearFinishCheckpoint = Checkpoint(vec3(1986.75, 74.97, 374.93), vec3(1, 0, 0), 20)
 local convoyNorthTurnCheckpoint = Checkpoint(vec3(-625.59, 146.59, 2240.01), vec3(-1, 0, 0), 25)      -- 2km - North Turn
 local convoyAirfieldCheckpoint = Checkpoint(vec3(-2177.44, 93.59, 1540.91), vec3(0, 0, -1), 20)       -- 4km - Airfield
